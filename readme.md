@@ -37,6 +37,8 @@ http://localhost:8888/index.php?q=YOUR_SCRIPT
 
 ### Example Scripts
 
+**Note**: In all examples below, `forbiddenPHP` is the name of the mimoLive document (the `.tvshow` file). This name comes from the document's `name` attribute in the API and is used as the first part of all paths: `documents/{documentName}/...`
+
 #### Activate a Layer
 ```php
 setLive('documents/forbiddenPHP/layers/MEv');
@@ -93,6 +95,36 @@ URL-encoded:
 ```
 http://localhost:8888/index.php?q=setSleep(5);%20setLive('documents/forbiddenPHP/layers/MEv');%20setSleep(1);%20setVolume('documents/forbiddenPHP/layers/MEv',%201.0);%20setSleep(1);%20setVolume('documents/forbiddenPHP/layers/MEv',%200.5);%20setSleep(1);%20setOff('documents/forbiddenPHP/layers/MEv');
 ```
+
+#### Parallel Execution - Multiple Layers Simultaneously
+```php
+// Activate 3 layers at once
+setLive('documents/forbiddenPHP/layers/MEv');
+setLive('documents/forbiddenPHP/layers/MEa');
+setLive('documents/forbiddenPHP/layers/Comments');
+setSleep(2);
+// After 2 seconds, adjust volumes on all 3 layers simultaneously
+setVolume('documents/forbiddenPHP/layers/MEv', 0.8);
+setVolume('documents/forbiddenPHP/layers/MEa', 0.6);
+setVolume('documents/forbiddenPHP/layers/Comments', 0.5);
+setSleep(3);
+// After 3 more seconds, deactivate all simultaneously
+setOff('documents/forbiddenPHP/layers/MEv');
+setOff('documents/forbiddenPHP/layers/MEa');
+setOff('documents/forbiddenPHP/layers/Comments');
+```
+
+URL-encoded:
+```
+http://localhost:8888/index.php?q=setLive('documents/forbiddenPHP/layers/MEv');%20setLive('documents/forbiddenPHP/layers/MEa');%20setLive('documents/forbiddenPHP/layers/Comments');%20setSleep(2);%20setVolume('documents/forbiddenPHP/layers/MEv',%200.8);%20setVolume('documents/forbiddenPHP/layers/MEa',%200.6);%20setVolume('documents/forbiddenPHP/layers/Comments',%200.5);%20setSleep(3);%20setOff('documents/forbiddenPHP/layers/MEv');%20setOff('documents/forbiddenPHP/layers/MEa');%20setOff('documents/forbiddenPHP/layers/Comments');
+```
+
+This example demonstrates the power of the queue system:
+- **Field 1**: All 3 `setLive()` calls execute in parallel (simultaneously)
+- **Sleep**: 2 seconds delay
+- **Field 2**: All 3 `setVolume()` calls execute in parallel
+- **Sleep**: 3 seconds delay
+- **Field 3**: All 3 `setOff()` calls execute in parallel
 
 ## API Functions
 
