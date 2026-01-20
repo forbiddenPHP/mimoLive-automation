@@ -450,29 +450,5 @@ This API is designed for local use only. The `eval()` function is used for scrip
 
 ## Open Issues / TODO
 
-### High Priority
-- [x] Multi-host support for master/backup setups
-- [x] Path variable support for cleaner code
-- [x] Configuration system for hosts
 - [ ] Implement `update()` function for batch attribute updates
-
-### Medium Priority
-- [ ] Add error handling for malformed scripts
-- [ ] Add validation for volume/gain ranges
-- [ ] Improve error messages with suggested fixes
 - [ ] Add support for more layer attributes (opacity, position, etc.)
-- [ ] Automatic failover from master to backup on connection failure
-
-### Low Priority
-- [ ] Add caching mechanism for namedAPI between requests
-- [ ] Add dry-run mode to preview actions without executing
-- [ ] Add logging system for debugging
-- [ ] Create web-based GUI for script building
-- [ ] Add host health monitoring dashboard
-
-### Future Considerations
-- [ ] Password encryption support for WebControl
-- [ ] Dynamic host discovery (mDNS/Bonjour)
-- [ ] REST API wrapper with proper HTTP methods (GET, POST, PATCH, DELETE)
-- [ ] WebSocket support for real-time updates
-- [ ] Load balancing across multiple hosts
