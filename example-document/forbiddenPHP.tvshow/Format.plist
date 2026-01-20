@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>TVApplicationRevision</key>
+	<integer>30704</integer>
+	<key>TVApplicationVersion</key>
+	<string>6.15</string>
+	<key>TVDocumentFormatVersion</key>
+	<string>3.200</string>
+	<key>TVHardwareModel</key>
+	<string>Mac14,14</string>
+	<key>TVMacOSVersion</key>
+	<string>Version 26.2 (Build 25C56)</string>
+	<key>TVPhysicalMemory</key>
+	<string>192.00 GB</string>
+	<key>TVProcessorCount</key>
+	<integer>24</integer>
+</dict>
+</plist>
