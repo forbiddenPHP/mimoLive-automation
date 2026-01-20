@@ -10,22 +10,44 @@ $GLOBALS['queue'] = [[]];
 
 // Include functions
 include('../functions/setter-getter.php');
+include('../functions/multiCurlRequest.php');
 include('../functions/namedAPI.php');
 include('../functions/queue.php');
-include('../functions/multiCurlRequest.php');
+
+// Setup host configuration
+$GLOBALS['hosts'] = ['master' => 'localhost'];
+$GLOBALS['protocol'] = 'http';
+$GLOBALS['port'] = 8989;
+$GLOBALS['namedAPI'] = [];
 
 echo "=== NAMEDAPI UPDATE TEST ===" . PHP_EOL . PHP_EOL;
 
+// Fetch documents from all hosts
+echo "Fetching documents from hosts..." . PHP_EOL;
+$requests = [];
+foreach ($GLOBALS['hosts'] as $hostName => $hostAddress) {
+    $url = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1/documents';
+    $requests[$hostName] = [
+        'url'    => $url,
+        'method' => 'GET',
+    ];
+}
+$hostsData = multiCurlRequest($requests);
+
 // Build namedAPI
 echo "Building namedAPI..." . PHP_EOL;
-$namedAPI = buildNamedAPI();
+$namedAPI = buildNamedAPI(null, $hostsData);
+$GLOBALS['namedAPI'] = $namedAPI;
 echo "Done!" . PHP_EOL . PHP_EOL;
+
+// Using base path variable
+$master_base = 'hosts/master/documents/forbiddenPHP/';
 
 // Get initial states
 echo "=== INITIAL STATES ===" . PHP_EOL;
-$mevInitial = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEv/attributes/live-state');
-$meaInitial = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEa/attributes/live-state');
-$meaVolumeInitial = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEa/attributes/volume');
+$mevInitial = array_get($namedAPI, $master_base . 'layers/MEv/attributes/live-state');
+$meaInitial = array_get($namedAPI, $master_base . 'layers/MEa/attributes/live-state');
+$meaVolumeInitial = array_get($namedAPI, $master_base . 'layers/MEa/attributes/volume');
 
 echo "MEv liveState: {$mevInitial}" . PHP_EOL;
 echo "MEa liveState: {$meaInitial}" . PHP_EOL;
@@ -35,16 +57,16 @@ echo PHP_EOL;
 // Queue actions
 echo "=== QUEUEING ACTIONS ===" . PHP_EOL;
 echo "1. Turn MEv ON" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEv');
+setLive($master_base . 'layers/MEv');
 
 echo "2. Turn MEa ON" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEa');
+setLive($master_base . 'layers/MEa');
 
 echo "3. Set MEa volume to 0.7" . PHP_EOL;
-setVolume('documents/forbiddenPHP/layers/MEa', 0.7);
+setVolume($master_base . 'layers/MEa', 0.7);
 
 echo "4. Turn MEv OFF" . PHP_EOL;
-setOff('documents/forbiddenPHP/layers/MEv');
+setOff($master_base . 'layers/MEv');
 
 echo PHP_EOL;
 
@@ -67,9 +89,9 @@ echo PHP_EOL;
 
 // Get updated states
 echo "=== UPDATED STATES (from namedAPI) ===" . PHP_EOL;
-$mevUpdated = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEv/attributes/live-state');
-$meaUpdated = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEa/attributes/live-state');
-$meaVolumeUpdated = array_get($namedAPI, 'documents/forbiddenPHP/layers/MEa/attributes/volume');
+$mevUpdated = array_get($namedAPI, $master_base . 'layers/MEv/attributes/live-state');
+$meaUpdated = array_get($namedAPI, $master_base . 'layers/MEa/attributes/live-state');
+$meaVolumeUpdated = array_get($namedAPI, $master_base . 'layers/MEa/attributes/volume');
 
 echo "MEv liveState: {$mevUpdated}" . PHP_EOL;
 echo "MEa liveState: {$meaUpdated}" . PHP_EOL;

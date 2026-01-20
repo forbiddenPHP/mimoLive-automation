@@ -6,23 +6,43 @@
  */
 
 // Initialize
-$GLOBALS['queue'] = [];
+$GLOBALS['queue'] = [[]];
 
 // Include functions
+include('../functions/multiCurlRequest.php');
 include('../functions/namedAPI.php');
 include('../functions/queue.php');
-include('../functions/multiCurlRequest.php');
+
+// Setup host configuration
+$GLOBALS['hosts'] = ['master' => 'localhost'];
+$GLOBALS['protocol'] = 'http';
+$GLOBALS['port'] = 8989;
 
 echo "=== QUEUE EXECUTION TEST ===" . PHP_EOL . PHP_EOL;
 
+// Fetch documents from all hosts
+echo "Fetching documents from hosts..." . PHP_EOL;
+$requests = [];
+foreach ($GLOBALS['hosts'] as $hostName => $hostAddress) {
+    $url = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1/documents';
+    $requests[$hostName] = [
+        'url'    => $url,
+        'method' => 'GET',
+    ];
+}
+$hostsData = multiCurlRequest($requests);
+
 // Build namedAPI
 echo "Building namedAPI..." . PHP_EOL;
-$namedAPI = buildNamedAPI();
+$namedAPI = buildNamedAPI(null, $hostsData);
 echo "Done!" . PHP_EOL . PHP_EOL;
+
+// Using base path variable
+$master_base = 'hosts/master/documents/forbiddenPHP/';
 
 // Show current state
 echo "=== CURRENT LAYER STATES ===" . PHP_EOL;
-foreach ($namedAPI['documents']['forbiddenPHP']['layers'] as $layerName => $layer) {
+foreach ($namedAPI['hosts']['master']['documents']['forbiddenPHP']['layers'] as $layerName => $layer) {
     echo "  {$layerName}: {$layer['attributes']['live-state']}" . PHP_EOL;
 }
 echo PHP_EOL;
@@ -32,19 +52,19 @@ echo "=== QUEUEING ACTIONS ===" . PHP_EOL;
 
 // Turn ON MEv
 echo "1. Turning ON MEv" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEv');
+setLive($master_base . 'layers/MEv');
 
 // Turn ON MEa
 echo "2. Turning ON MEa" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEa');
+setLive($master_base . 'layers/MEa');
 
 // Set volume on MEa (has volume support)
 echo "3. Setting MEa volume to 0.6" . PHP_EOL;
-setVolume('documents/forbiddenPHP/layers/MEa', 0.6);
+setVolume($master_base . 'layers/MEa', 0.6);
 
 // Cycle SwitcherSwitch variants
 echo "4. Cycling SwitcherSwitch to next variant" . PHP_EOL;
-cycleLayerVariantsForward('documents/forbiddenPHP/layers/SwitcherSwitch', false);
+cycleLayerVariantsForward($master_base . 'layers/SwitcherSwitch', false);
 
 echo PHP_EOL;
 
@@ -73,7 +93,7 @@ echo PHP_EOL;
 
 // Show updated state
 echo "=== UPDATED LAYER STATES ===" . PHP_EOL;
-foreach ($namedAPI['documents']['forbiddenPHP']['layers'] as $layerName => $layer) {
+foreach ($namedAPI['hosts']['master']['documents']['forbiddenPHP']['layers'] as $layerName => $layer) {
     echo "  {$layerName}: {$layer['attributes']['live-state']}" . PHP_EOL;
 }
 echo PHP_EOL;

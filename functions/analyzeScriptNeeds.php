@@ -33,58 +33,58 @@ function analyzeScriptNeeds($script) {
     $lines = explode("\n", $script);
 
     foreach ($lines as $line) {
-        // Check for layers
-        if ($checks['check_layers'] && str_contains($line, '/layers/')) {
+        // Check for layers keyword
+        if ($checks['check_layers'] && str_contains($line, 'layers')) {
             $needs['layers'] = true;
             $checks['check_layers'] = false;
         }
 
-        // Check for variants (requires layers)
-        if ($checks['check_variants'] && str_contains($line, '/variants/')) {
+        // Check for variants keyword (requires layers)
+        if ($checks['check_variants'] && str_contains($line, 'variants')) {
             $needs['layers'] = true;
             $needs['layers_variants'] = true;
             $checks['check_variants'] = false;
             $checks['check_layers'] = false;
         }
 
-        // Check for signals on layers (requires layers)
-        if ($checks['check_signals'] && str_contains($line, 'triggerSignal') && str_contains($line, '/layers/')) {
-            $needs['layers'] = true;
-            $needs['layers_signals'] = true;
+        // Check for signals (requires checking what it's targeting)
+        if ($checks['check_signals'] && str_contains($line, 'triggerSignal')) {
+            // Check if it's targeting layers or sources
+            if (str_contains($line, 'layers')) {
+                $needs['layers'] = true;
+                $needs['layers_signals'] = true;
+                $checks['check_layers'] = false;
+            }
+            if (str_contains($line, 'sources')) {
+                $needs['sources'] = true;
+                $needs['sources_signals'] = true;
+                $checks['check_sources'] = false;
+            }
             $checks['check_signals'] = false;
-            $checks['check_layers'] = false;
         }
 
-        // Check for sources
-        if ($checks['check_sources'] && str_contains($line, '/sources/')) {
+        // Check for sources keyword
+        if ($checks['check_sources'] && str_contains($line, 'sources')) {
             $needs['sources'] = true;
             $checks['check_sources'] = false;
         }
 
-        // Check for filters (requires sources)
-        if ($checks['check_filters'] && str_contains($line, '/filters/')) {
+        // Check for filters keyword (requires sources)
+        if ($checks['check_filters'] && str_contains($line, 'filters')) {
             $needs['sources'] = true;
             $needs['sources_filters'] = true;
             $checks['check_filters'] = false;
             $checks['check_sources'] = false;
         }
 
-        // Check for signals on sources (requires sources)
-        if ($checks['check_signals'] && str_contains($line, 'triggerSignal') && str_contains($line, '/sources/')) {
-            $needs['sources'] = true;
-            $needs['sources_signals'] = true;
-            $checks['check_signals'] = false;
-            $checks['check_sources'] = false;
-        }
-
-        // Check for layer-sets
-        if ($checks['check_layer_sets'] && str_contains($line, '/layer-sets/')) {
+        // Check for layer-sets keyword
+        if ($checks['check_layer_sets'] && str_contains($line, 'layer-sets')) {
             $needs['layer-sets'] = true;
             $checks['check_layer_sets'] = false;
         }
 
-        // Check for output-destinations
-        if ($checks['check_outputs'] && str_contains($line, '/output-destinations/')) {
+        // Check for output-destinations keyword
+        if ($checks['check_outputs'] && str_contains($line, 'output-destinations')) {
             $needs['output-destinations'] = true;
             $checks['check_outputs'] = false;
         }

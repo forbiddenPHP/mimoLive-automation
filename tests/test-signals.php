@@ -10,20 +10,42 @@ $GLOBALS['queue'] = [[]];
 
 // Include functions
 include('../functions/setter-getter.php');
+include('../functions/multiCurlRequest.php');
 include('../functions/namedAPI.php');
 include('../functions/queue.php');
-include('../functions/multiCurlRequest.php');
+
+// Setup host configuration
+$GLOBALS['hosts'] = ['master' => 'localhost'];
+$GLOBALS['protocol'] = 'http';
+$GLOBALS['port'] = 8989;
+$GLOBALS['namedAPI'] = [];
 
 echo "=== SIGNAL TRIGGER TEST ===" . PHP_EOL . PHP_EOL;
 
+// Fetch documents from all hosts
+echo "Fetching documents from hosts..." . PHP_EOL;
+$requests = [];
+foreach ($GLOBALS['hosts'] as $hostName => $hostAddress) {
+    $url = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1/documents';
+    $requests[$hostName] = [
+        'url'    => $url,
+        'method' => 'GET',
+    ];
+}
+$hostsData = multiCurlRequest($requests);
+
 // Build namedAPI
 echo "Building namedAPI..." . PHP_EOL;
-$namedAPI = buildNamedAPI();
+$namedAPI = buildNamedAPI(null, $hostsData);
+$GLOBALS['namedAPI'] = $namedAPI;
 echo "Done!" . PHP_EOL . PHP_EOL;
+
+// Using base path variable
+$master_base = 'hosts/master/documents/forbiddenPHP/';
 
 // Show available signals on Video Switcher layer
 echo "=== AVAILABLE SIGNALS ON VIDEO SWITCHER ===" . PHP_EOL;
-$signals = array_get($namedAPI, 'documents/forbiddenPHP/layers/Video Switcher/signals');
+$signals = memo_get($master_base . 'layers/Video Switcher/signals');
 
 if ($signals) {
     foreach ($signals as $normalizedName => $signalData) {
@@ -38,7 +60,7 @@ echo PHP_EOL;
 // Test triggering a signal
 echo "=== TESTING SIGNAL TRIGGER ===" . PHP_EOL;
 echo "Triggering signal 'Cut 1' on Video Switcher..." . PHP_EOL;
-triggerSignal('Cut 1', 'documents/forbiddenPHP/layers/Video Switcher');
+triggerSignal('Cut 1', $master_base . 'layers/Video Switcher');
 
 echo "Executing queue..." . PHP_EOL;
 $results = executeQueue($namedAPI);

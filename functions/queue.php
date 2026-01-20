@@ -9,7 +9,7 @@
 /**
  * Add an action to the queue
  *
- * @param string $path Named path (e.g., "documents/forbiddenPHP/layers/Comments")
+ * @param string $path Named path (e.g., "hosts/master/documents/forbiddenPHP/layers/Comments")
  * @param string $action Action type (setLive, setOff, setVolume, etc.)
  * @param mixed $data Optional data for the action
  */
@@ -45,8 +45,14 @@ function setSleep($seconds) {
     // Convert to float to support fractions
     $seconds = (float)$seconds;
 
-    // Add sleep marker to current field
+    // If current field is not empty, start a new field
     $currentFieldIndex = count($GLOBALS['queue']) - 1;
+    if (!empty($GLOBALS['queue'][$currentFieldIndex])) {
+        $GLOBALS['queue'][] = [];
+        $currentFieldIndex++;
+    }
+
+    // Add sleep marker to this (now empty) field
     $GLOBALS['queue'][$currentFieldIndex][] = [
         'type' => 'sleep',
         'duration' => $seconds
@@ -112,7 +118,6 @@ function executeQueue(&$namedAPI) {
  * @return array Results
  */
 function executeField($field, &$namedAPI) {
-    $baseUrl = 'http://localhost:8989/api/v1';
     $requests = [];
     $requestMeta = [];
     $results = [];
@@ -140,9 +145,9 @@ function executeField($field, &$namedAPI) {
         $action = $queueItem['action'];
         $data = $queueItem['data'];
 
-        // Resolve path to UUIDs
-        $uuidPath = buildUUIDPath($path, $namedAPI);
-        if ($uuidPath === null) {
+        // Resolve path to UUIDs and get host info
+        $resolved = buildUUIDPath($path, $namedAPI);
+        if ($resolved === null) {
             $results[] = [
                 'path' => $path,
                 'action' => $action,
@@ -151,7 +156,21 @@ function executeField($field, &$namedAPI) {
             continue;
         }
 
-        // Build API endpoint
+        // Build API endpoint with host-specific URL
+        $hostName = $resolved['host'];
+        $uuidPath = $resolved['path'];
+        $hostAddress = $GLOBALS['hosts'][$hostName] ?? null;
+
+        if ($hostAddress === null) {
+            $results[] = [
+                'path' => $path,
+                'action' => $action,
+                'result' => ['error' => 'Host not found: ' . $hostName]
+            ];
+            continue;
+        }
+
+        $baseUrl = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1';
         $endpoint = $baseUrl . '/' . $uuidPath;
         $method = 'GET';
         $requestData = null;
@@ -309,7 +328,12 @@ function updateNamedAPIFromResponse(&$namedAPI, $path, $responseData) {
     $parts = explode('/', trim($path, '/'));
     $current = &$namedAPI;
 
-    // Navigate to the target location
+    // First part must be 'hosts'
+    if ($parts[0] !== 'hosts') {
+        return;
+    }
+
+    // Navigate to the target location (including hosts/$name)
     for ($i = 0; $i < count($parts); $i += 2) {
         $type = $parts[$i];
         $name = $parts[$i + 1] ?? null;

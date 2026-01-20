@@ -9,23 +9,43 @@
 $GLOBALS['queue'] = [[]];
 
 // Include functions
+include('../functions/multiCurlRequest.php');
 include('../functions/namedAPI.php');
 include('../functions/queue.php');
-include('../functions/multiCurlRequest.php');
+
+// Setup host configuration
+$GLOBALS['hosts'] = ['master' => 'localhost'];
+$GLOBALS['protocol'] = 'http';
+$GLOBALS['port'] = 8989;
 
 echo "=== QUEUE FIELDS TEST ===" . PHP_EOL . PHP_EOL;
 
+// Fetch documents from all hosts
+echo "Fetching documents from hosts..." . PHP_EOL;
+$requests = [];
+foreach ($GLOBALS['hosts'] as $hostName => $hostAddress) {
+    $url = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1/documents';
+    $requests[$hostName] = [
+        'url'    => $url,
+        'method' => 'GET',
+    ];
+}
+$hostsData = multiCurlRequest($requests);
+
 // Build namedAPI
 echo "Building namedAPI..." . PHP_EOL;
-$namedAPI = buildNamedAPI();
+$namedAPI = buildNamedAPI(null, $hostsData);
 echo "Done!" . PHP_EOL . PHP_EOL;
 
 echo "=== QUEUEING ACTIONS IN FIELDS ===" . PHP_EOL . PHP_EOL;
 
+// Using base path variable
+$master_base = 'hosts/master/documents/forbiddenPHP/';
+
 // Field 1: Turn ON layers
 echo "Field 1: Turn ON MEv and MEa" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEv');
-setLive('documents/forbiddenPHP/layers/MEa');
+setLive($master_base . 'layers/MEv');
+setLive($master_base . 'layers/MEa');
 
 // Add 1.5 second sleep and start new field
 echo "Sleep 1.5 seconds" . PHP_EOL;
@@ -33,9 +53,9 @@ setSleep(1.5);
 
 // Field 2: Adjust volumes and turn OFF
 echo "Field 2: Adjust volumes and turn layers OFF" . PHP_EOL;
-setVolume('documents/forbiddenPHP/layers/MEa', 0.5);
-setOff('documents/forbiddenPHP/layers/MEv');
-setOff('documents/forbiddenPHP/layers/MEa');
+setVolume($master_base . 'layers/MEa', 0.5);
+setOff($master_base . 'layers/MEv');
+setOff($master_base . 'layers/MEa');
 
 // Add 0.5 second sleep
 echo "Sleep 0.5 seconds (fraction test)" . PHP_EOL;
@@ -43,7 +63,7 @@ setSleep(0.5);
 
 // Field 3: Turn layers back ON
 echo "Field 3: Turn MEv back ON" . PHP_EOL;
-setLive('documents/forbiddenPHP/layers/MEv');
+setLive($master_base . 'layers/MEv');
 
 echo PHP_EOL;
 

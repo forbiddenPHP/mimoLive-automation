@@ -6,23 +6,43 @@
  */
 
 // Initialize
-$GLOBALS['queue'] = [];
+$GLOBALS['queue'] = [[]];
 
 // Include functions
+include('../functions/multiCurlRequest.php');
 include('../functions/namedAPI.php');
 include('../functions/queue.php');
-include('../functions/multiCurlRequest.php');
+
+// Setup host configuration
+$GLOBALS['hosts'] = ['master' => 'localhost'];
+$GLOBALS['protocol'] = 'http';
+$GLOBALS['port'] = 8989;
 
 echo "=== SOURCE GAIN TEST ===" . PHP_EOL . PHP_EOL;
 
+// Fetch documents from all hosts
+echo "Fetching documents from hosts..." . PHP_EOL;
+$requests = [];
+foreach ($GLOBALS['hosts'] as $hostName => $hostAddress) {
+    $url = $GLOBALS['protocol'] . '://' . $hostAddress . ':' . $GLOBALS['port'] . '/api/v1/documents';
+    $requests[$hostName] = [
+        'url'    => $url,
+        'method' => 'GET',
+    ];
+}
+$hostsData = multiCurlRequest($requests);
+
 // Build namedAPI
 echo "Building namedAPI..." . PHP_EOL;
-$namedAPI = buildNamedAPI();
+$namedAPI = buildNamedAPI(null, $hostsData);
 echo "Done!" . PHP_EOL . PHP_EOL;
+
+// Using base path variable
+$master_base = 'hosts/master/documents/forbiddenPHP/';
 
 // Show available sources
 echo "=== AVAILABLE SOURCES ===" . PHP_EOL;
-foreach ($namedAPI['documents']['forbiddenPHP']['sources'] as $sourceName => $source) {
+foreach ($namedAPI['hosts']['master']['documents']['forbiddenPHP']['sources'] as $sourceName => $source) {
     $gain = $source['attributes']['gain'] ?? 'null';
     echo "  {$sourceName}: gain={$gain}" . PHP_EOL;
 }
@@ -32,10 +52,10 @@ echo PHP_EOL;
 echo "=== QUEUEING ACTIONS ===" . PHP_EOL;
 
 echo "1. Setting a1 gain to 1.5" . PHP_EOL;
-setGain('documents/forbiddenPHP/sources/a1', 1.5);
+setGain($master_base . 'sources/a1', 1.5);
 
 echo "2. Setting c1 gain to 0.8" . PHP_EOL;
-setGain('documents/forbiddenPHP/sources/c1', 0.8);
+setGain($master_base . 'sources/c1', 0.8);
 
 echo PHP_EOL;
 

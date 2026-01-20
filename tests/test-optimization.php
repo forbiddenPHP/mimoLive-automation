@@ -14,7 +14,7 @@ echo "=== SCRIPT ANALYSIS OPTIMIZATION TEST ===" . PHP_EOL . PHP_EOL;
 $testScripts = [
     // Test 1: Only layers
     [
-        'script' => "setLive('documents/forbiddenPHP/layers/MEv');\nsetOff('documents/forbiddenPHP/layers/MEa');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/layers/MEv');\nsetOff('hosts/master/documents/forbiddenPHP/layers/MEa');",
         'expected' => [
             'layers' => true,
             'layers_variants' => false,
@@ -29,7 +29,7 @@ $testScripts = [
 
     // Test 2: Layers with variants
     [
-        'script' => "setLive('documents/forbiddenPHP/layers/Comments/variants/Variant 1');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/layers/Comments/variants/Variant 1');",
         'expected' => [
             'layers' => true,
             'layers_variants' => true,
@@ -44,7 +44,7 @@ $testScripts = [
 
     // Test 3: Layers with signals
     [
-        'script' => "triggerSignal('Cut 1', 'documents/forbiddenPHP/layers/Video Switcher');",
+        'script' => "triggerSignal('Cut 1', 'hosts/master/documents/forbiddenPHP/layers/Video Switcher');",
         'expected' => [
             'layers' => true,
             'layers_variants' => false,
@@ -59,7 +59,7 @@ $testScripts = [
 
     // Test 4: Sources only
     [
-        'script' => "setLive('documents/forbiddenPHP/sources/MacStudio');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/sources/MacStudio');",
         'expected' => [
             'layers' => false,
             'layers_variants' => false,
@@ -74,7 +74,7 @@ $testScripts = [
 
     // Test 5: Sources with filters
     [
-        'script' => "setLive('documents/forbiddenPHP/sources/c1/filters/Color Correction');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/sources/c1/filters/Color Correction');",
         'expected' => [
             'layers' => false,
             'layers_variants' => false,
@@ -89,7 +89,7 @@ $testScripts = [
 
     // Test 6: Layer-sets
     [
-        'script' => "setLive('documents/forbiddenPHP/layer-sets/RunA');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/layer-sets/RunA');",
         'expected' => [
             'layers' => false,
             'layers_variants' => false,
@@ -104,7 +104,7 @@ $testScripts = [
 
     // Test 7: Output destinations
     [
-        'script' => "setLive('documents/forbiddenPHP/output-destinations/TW-stream');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/output-destinations/TW-stream');",
         'expected' => [
             'layers' => false,
             'layers_variants' => false,
@@ -119,11 +119,11 @@ $testScripts = [
 
     // Test 8: Complex script with multiple types
     [
-        'script' => "setLive('documents/forbiddenPHP/layers/MEv');\n" .
-                   "setLive('documents/forbiddenPHP/layers/Comments/variants/Variant 1');\n" .
-                   "triggerSignal('Cut 1', 'documents/forbiddenPHP/layers/Video Switcher');\n" .
-                   "setLive('documents/forbiddenPHP/sources/c1/filters/Color Correction');\n" .
-                   "setLive('documents/forbiddenPHP/layer-sets/RunA');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/layers/MEv');\n" .
+                   "setLive('hosts/master/documents/forbiddenPHP/layers/Comments/variants/Variant 1');\n" .
+                   "triggerSignal('Cut 1', 'hosts/master/documents/forbiddenPHP/layers/Video Switcher');\n" .
+                   "setLive('hosts/master/documents/forbiddenPHP/sources/c1/filters/Color Correction');\n" .
+                   "setLive('hosts/master/documents/forbiddenPHP/layer-sets/RunA');",
         'expected' => [
             'layers' => true,
             'layers_variants' => true,
@@ -138,9 +138,9 @@ $testScripts = [
 
     // Test 9: Early exit optimization (variants found first)
     [
-        'script' => "setLive('documents/forbiddenPHP/layers/Comments/variants/Variant 1');\n" .
-                   "setLive('documents/forbiddenPHP/layers/MEv');\n" .
-                   "setLive('documents/forbiddenPHP/layers/MEa');",
+        'script' => "setLive('hosts/master/documents/forbiddenPHP/layers/Comments/variants/Variant 1');\n" .
+                   "setLive('hosts/master/documents/forbiddenPHP/layers/MEv');\n" .
+                   "setLive('hosts/master/documents/forbiddenPHP/layers/MEa');",
         'expected' => [
             'layers' => true,
             'layers_variants' => true,
