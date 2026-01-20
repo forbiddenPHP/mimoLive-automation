@@ -200,6 +200,44 @@ setSleep(1);
 setOff($master_base . 'layers/MEv');
 ```
 
+#### Animated Volume Transitions
+```php
+$master_base = 'hosts/master/documents/forbiddenPHP/';
+
+// Activate layer and fade in audio simultaneously
+setLive($master_base . 'layers/MEa');
+setAnimateVolumeTo($master_base . 'layers/MEa', 1.0);  // Fade from current volume to 1.0 over 1 second (30 steps @ 30 FPS)
+
+setSleep(5);
+
+// Fade out before deactivating
+setAnimateVolumeTo($master_base . 'layers/MEa', 0.0);  // Fade to 0 over 1 second
+setSleep(1);
+setOff($master_base . 'layers/MEa');
+```
+
+#### Multiple Synchronized Animations
+```php
+$master_base = 'hosts/master/documents/forbiddenPHP/';
+
+// Activate both layers and fade them in simultaneously (synchronized timing)
+setLive($master_base . 'layers/MEa');
+setLive($master_base . 'layers/MEv');
+setAnimateVolumeTo($master_base . 'layers/MEa', 1.0);  // Both animations
+setAnimateVolumeTo($master_base . 'layers/MEv', 0.8);  // run in lockstep
+
+setSleep(5);
+
+// Crossfade: MEa fades out while MEv fades up (synchronized)
+setAnimateVolumeTo($master_base . 'layers/MEa', 0.0);
+setAnimateVolumeTo($master_base . 'layers/MEv', 1.0);
+```
+
+This demonstrates:
+- **Multiple animations in one block execute in lockstep**: Both audio fades happen simultaneously with synchronized frame timing
+- **Sleep timing is shared**: Only one sleep (1/FPS) per animation step for all animations in the block
+- **Smooth crossfades**: Perfect for transitioning between audio sources
+
 #### Parallel Execution - Multiple Layers Simultaneously
 ```php
 $master_base = 'hosts/master/documents/forbiddenPHP/';
@@ -259,7 +297,14 @@ This demonstrates:
 ### Audio Control
 
 - `setVolume($path, $volume)` - Set volume (0.0 to 1.0)
-- `setGain($path, $gain)` - Set gain in dB (e.g., -6.0)
+- `setGain($path, $gain)` - Set gain (0.0 to 2.0)
+- `setAnimateVolumeTo($path, $target_value, $steps = null)` - Animate volume from current to target value
+  - `$steps`: Number of animation steps (default: FPS from document, typically 30)
+  - Animations run in parallel with other actions but execute internally sequential
+  - Multiple animations in the same block are synchronized with shared timing
+- `setAnimateGainTo($path, $target_value, $steps = null)` - Animate gain from current to target value
+  - `$steps`: Number of animation steps (default: FPS from document, typically 30)
+  - Same parallel/sequential behavior as volume animation
 
 ### Signal Control
 

@@ -30,12 +30,6 @@ configuration:
     $GLOBALS['changes'] = [];
     $GLOBALS['namedAPI'] = [];
 
-session:
-// We need a fixed session_id, so we can work with mimoLive on the same session.
-    session_name("UMIMOLIVE");
-    session_id("01UMIMOSESSION10");
-    session_start();
-
 functions:
     include('functions/setter-getter.php');
     include('functions/multiCurlRequest.php');
@@ -107,15 +101,42 @@ namedAPI:
 workflow:
     eval($script);
 
-execute:
-// Execute the queue
-    $results = executeQueue($GLOBALS['namedAPI']);
-
 output:
-// Output only JSON
-    header("Content-Type: application/json");
-    echo json_encode([
+// Allow script to continue even if client disconnects
+    ignore_user_abort(true);
+    set_time_limit(0);
+
+    // Send immediate response with queue preview (before execution)
+    $response = json_encode([
         'success' => true,
-        'changes' => $GLOBALS['changes'],
-        'count' => count($GLOBALS['changes'])
+        'status' => 'queued',
+        'blocks' => count($GLOBALS['queue']),
+        'queue' => $GLOBALS['queue']
     ]);
+
+    // Send headers to close connection immediately
+    header("Content-Type: application/json");
+    header("Content-Length: " . strlen($response));
+    header("Connection: close");
+
+    // Disable output buffering
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+
+    echo $response;
+
+    // Flush all output buffers
+    if (function_exists('fastcgi_finish_request')) {
+        // PHP-FPM: This closes the connection to the client
+        fastcgi_finish_request();
+    } else {
+        // Alternative for Apache/CGI
+        flush();
+    }
+
+    // Connection is now closed, but script continues
+
+execute:
+// Execute the queue after response sent and connection closed
+    $results = executeQueue($GLOBALS['namedAPI']);
