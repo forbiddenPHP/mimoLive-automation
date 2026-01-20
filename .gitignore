@@ -8,10 +8,11 @@
 .env
 .env.local
 .env.*.local
+docs
 
 # Claude Code
 .claude/
-docs/
+
 
 # Visual Studio Code
 .vscode/
