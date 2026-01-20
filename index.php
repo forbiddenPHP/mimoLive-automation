@@ -99,7 +99,7 @@ namedAPI:
     $GLOBALS['namedAPI'] = buildNamedAPI($needs, $data);
 
 workflow:
-    eval($script);
+    eval($script.';');
 
 output:
 // Allow script to continue even if client disconnects

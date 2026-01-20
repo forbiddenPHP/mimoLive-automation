@@ -55,7 +55,7 @@ http://localhost:8888/?f=demo
 
 **Execute inline script (URL-encoded):**
 ```
-http://localhost:8888/?q=setLive('hosts/master/documents/forbiddenPHP/layers/MEv');
+http://localhost:8888/?q=setLive%28%27hosts%2Fmaster%2Fdocuments%2FforbiddenPHP%2Flayers%2FMEv%27%29%3B
 ```
 
 ### Script Examples
