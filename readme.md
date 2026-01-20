@@ -289,34 +289,82 @@ This demonstrates:
 
 ## API Functions
 
+All functions below are **queue-compatible** and designed to work with the parallel/sequential execution system.
+
 ### Layer/Source Control
 
-- `setLive($path)` - Activate a layer, source, variant, layer-set, or output-destination
-- `setOff($path)` - Deactivate a layer, source, variant, or output-destination
+- **`setLive($path)`** - Activate a layer, source, variant, layer-set, or output-destination
+  - Executes in parallel with other actions in the same block
+  - Example: `setLive('hosts/master/documents/forbiddenPHP/layers/MEv')`
+
+- **`setOff($path)`** - Deactivate a layer, source, variant, or output-destination
+  - Executes in parallel with other actions in the same block
+  - Example: `setOff('hosts/master/documents/forbiddenPHP/layers/MEv')`
 
 ### Audio Control
 
-- `setVolume($path, $volume)` - Set volume (0.0 to 1.0)
-- `setGain($path, $gain)` - Set gain (0.0 to 2.0)
-- `setAnimateVolumeTo($path, $target_value, $steps = null)` - Animate volume from current to target value
+- **`setVolume($path, $volume)`** - Set volume instantly (0.0 to 1.0)
+  - Executes in parallel with other actions in the same block
+  - Example: `setVolume('hosts/master/documents/forbiddenPHP/layers/MEa', 0.5)`
+
+- **`setGain($path, $gain)`** - Set gain instantly (0.0 to 2.0)
+  - Executes in parallel with other actions in the same block
+  - Example: `setGain('hosts/master/documents/forbiddenPHP/sources/Camera', 1.5)`
+
+- **`setAnimateVolumeTo($path, $target_value, $steps = null)`** - Animate volume from current to target value
   - `$steps`: Number of animation steps (default: FPS from document, typically 30)
-  - Animations run in parallel with other actions but execute internally sequential
-  - Multiple animations in the same block are synchronized with shared timing
-- `setAnimateGainTo($path, $target_value, $steps = null)` - Animate gain from current to target value
+  - **Execution**: Animations run in parallel with other actions but execute internally sequential
+  - **Synchronization**: Multiple animations in the same block are synchronized with shared timing
+  - **Sleep**: Only one sleep (1/FPS) per animation step for all animations in the block
+  - Example: `setAnimateVolumeTo('hosts/master/documents/forbiddenPHP/layers/MEa', 1.0, 30)`
+
+- **`setAnimateGainTo($path, $target_value, $steps = null)`** - Animate gain from current to target value
   - `$steps`: Number of animation steps (default: FPS from document, typically 30)
-  - Same parallel/sequential behavior as volume animation
+  - **Execution**: Same parallel/sequential behavior as volume animation
+  - **Synchronization**: Multiple animations in the same block run in lockstep
+  - Example: `setAnimateGainTo('hosts/master/documents/forbiddenPHP/sources/Camera', 0.5, 15)`
 
 ### Signal Control
 
-- `triggerSignal($signalName, $path)` - Trigger a signal by name
+- **`triggerSignal($signalName, $path)`** - Trigger a signal by name
+  - Executes in parallel with other actions in the same block
   - Signal names are normalized (spaces, hyphens, underscores removed, lowercase)
-  - Example: `Cut 1`, `Cut_1`, `cut-1` all map to `cut1`
+  - Example: `triggerSignal('Cut 1', 'hosts/master/documents/forbiddenPHP/layers/Video Switcher')`
+  - `Cut 1`, `Cut_1`, `cut-1` all map to the same signal
 
 ### Queue Control
 
-- `setSleep($seconds)` - Add a delay and create a new execution field
-  - Actions before `setSleep()` execute in parallel
-  - Actions after `setSleep()` wait for the delay, then execute in parallel
+- **`setSleep($seconds)`** - Add a delay and create a new execution block
+  - Actions **before** `setSleep()` execute in parallel
+  - Actions **after** `setSleep()` wait for the delay, then execute in parallel
+  - Supports fractions (e.g., `setSleep(0.5)` for 500ms)
+  - Example: `setSleep(2)` for 2 seconds delay
+
+## Function Execution Behavior
+
+### Parallel Execution
+All functions except animations execute immediately in parallel when in the same block:
+```php
+setLive($base . 'layers/MEv');      // These 3 execute
+setVolume($base . 'layers/MEa', 1); // simultaneously
+triggerSignal('Cut 1', $base . 'layers/Switcher');
+```
+
+### Sequential Execution (Animations Only)
+Animation functions execute sequentially but **start** in parallel with other actions:
+```php
+setLive($base . 'layers/MEv');           // Executes immediately
+setAnimateVolumeTo($base . 'layers/MEa', 1.0, 30); // Starts simultaneously, runs 30 steps
+// Both actions start at the same time, block completes when animation finishes
+```
+
+### Synchronized Animations
+Multiple animations in the same block run in perfect lockstep:
+```php
+setAnimateVolumeTo($base . 'layers/MEa', 1.0);  // Step 1, sleep, step 2, sleep...
+setAnimateVolumeTo($base . 'layers/MEv', 0.8);  // Step 1, sleep, step 2, sleep...
+// Both animations progress together with ONE shared sleep per step
+```
 
 ## Path Structure
 
