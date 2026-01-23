@@ -878,6 +878,73 @@ script_functions:
         setValue($namedAPI_path, [$property => $value]);
     }
 
+    function mimoColor($color_string) {
+        $color_string = trim($color_string);
+
+        // Hex format: #...
+        if ($color_string[0] === '#') {
+            $hex = substr($color_string, 1);
+            $len = strlen($hex);
+
+            // Expand to 8 characters (RRGGBBAA)
+            if ($len === 1) {
+                // #A → #AAAAAAFF
+                $hex = str_repeat($hex, 6) . 'FF';
+            } elseif ($len === 2) {
+                // #AB → #AAAAAABB (6x first + 2x second)
+                $hex = str_repeat($hex[0], 6) . str_repeat($hex[1], 2);
+            } elseif ($len === 3) {
+                // #F73 → #FF7733FF
+                $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].'FF';
+            } elseif ($len === 4) {
+                // #F73A → #FF7733AA
+                $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].$hex[3].$hex[3];
+            } elseif ($len === 6) {
+                // #FF5733 → #FF5733FF
+                $hex = $hex . 'FF';
+            } elseif ($len === 8) {
+                // #FF5733AA → #FF5733AA
+                // Already 8 characters
+            } else {
+                debug_print("mimoColor() ERROR: Invalid hex color length: $color_string\n");
+                return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
+            }
+
+            // Convert to 0-1 range
+            $r = hexdec(substr($hex, 0, 2)) / 255.0;
+            $g = hexdec(substr($hex, 2, 2)) / 255.0;
+            $b = hexdec(substr($hex, 4, 2)) / 255.0;
+            $a = hexdec(substr($hex, 6, 2)) / 255.0;
+
+            return ['red' => $r, 'green' => $g, 'blue' => $b, 'alpha' => $a];
+        }
+
+        // Comma-separated format: R,G,B,A
+        if (strpos($color_string, ',') !== false) {
+            $parts = array_map('trim', explode(',', $color_string));
+
+            // Check if percentage format
+            if (strpos($parts[0], '%') !== false) {
+                // Percentage format: 100%,50%,0%,100%
+                $r = (float)str_replace('%', '', $parts[0]) / 100.0;
+                $g = (float)str_replace('%', '', $parts[1]) / 100.0;
+                $b = (float)str_replace('%', '', $parts[2]) / 100.0;
+                $a = isset($parts[3]) ? (float)str_replace('%', '', $parts[3]) / 100.0 : 1.0;
+            } else {
+                // 0-255 format: 255,128,64,255
+                $r = (float)$parts[0] / 255.0;
+                $g = (float)$parts[1] / 255.0;
+                $b = (float)$parts[2] / 255.0;
+                $a = isset($parts[3]) ? (float)$parts[3] / 255.0 : 1.0;
+            }
+
+            return ['red' => $r, 'green' => $g, 'blue' => $b, 'alpha' => $a];
+        }
+
+        debug_print("mimoColor() ERROR: Unknown color format: $color_string\n");
+        return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
+    }
+
     function setSleep($frac_seconds) {
         global $current_frame, $framerate;
 

@@ -27,19 +27,23 @@ These are the officially supported commands for controlling mimoLive:
 
 - **`setLive($namedAPI_path)`** - Turn a layer or variant live
   ```php
-  $base = 'hosts/master/documents/MyShow/';
+  $base = 'hosts/master/documents/forbiddenPHP/';
   setLive($base.'layers/Comments');
-  setLive($base.'layers/Title/variants/blue');
+  setLive($base.'layers/JoPhi DEMOS/variants/stop');
+  setLive($base.'output-destinations/TV out');
   ```
 
 - **`setOff($namedAPI_path)`** - Turn a layer off
   ```php
   setOff($base.'layers/Comments');
+  setOff($base.'layers/MEv');
+  setOff($base.'output-destinations/TV out');
   ```
 
 - **`recall($namedAPI_path)`** - Recall a layer-set
   ```php
-  recall($base.'layer-sets/Intro');
+  recall($base.'layer-sets/RunA');
+  recall($base.'layer-sets/OFF');
   ```
   *Note: After recall executes, the entire namedAPI is rebuilt to reflect the new state.*
 
@@ -49,47 +53,30 @@ These are the officially supported commands for controlling mimoLive:
   setValue($base, ['programOutputMasterVolume' => 0.8]);
 
   // Layer properties
-  setValue($base.'layers/Audio', ['volume' => 0.5]);
-
-  // Variant properties
-  setValue($base.'layers/Title/variants/blue', ['volume' => 0.3]);
+  setValue($base.'layers/MEa', ['volume' => 0.5]);
 
   // Source properties
-  setValue($base.'sources/Camera1', ['gain' => 1.2]);
+  setValue($base.'sources/a1', ['gain' => 1.2]);
 
-  // Source filter properties
-  setValue($base.'sources/Camera1/filters/ColorCorrection', [
+  // Source text content (input-values)
+  setValue($base.'sources/Color', [
       'input-values' => [
-          'tvGroup_Content__Brightness' => 0.5
+          'tvGroup_Content__Text_TypeMultiline' => 'Hello World'
       ]
   ]);
 
-  // Set multiple properties at once
-  setValue($base.'layers/Audio', ['volume' => 0.5, 'opacity' => 0.8]);
-
-  // Layer input-values
-  setValue($base.'layers/Title', [
-      'input-values' => [
-          'tvGroup_Content__Title' => 'New Title',
-          'tvGroup_Content__Subtitle' => 'Subtitle'
-      ]
-  ]);
-
-  // Mix properties and input-values
-  setValue($base.'layers/Audio', [
-      'volume' => 0.5,
-      'input-values' => ['tvGroup_Control__Mute' => false]
-  ]);
+  // Multiple properties at once
+  setValue($base.'layers/MEa', ['volume' => 0.5, 'opacity' => 0.8]);
   ```
   *Note: Changes are queued in the current frame and execute in parallel with other actions. The namedAPI is updated after successful execution.*
 
 - **`setVolume($namedAPI_path, $value)`** - Convenient shortcut to set volume/gain across different contexts
   ```php
   // Automatically uses the correct property based on context:
-  setVolume($base, 0.8);                           // Document: programOutputMasterVolume
-  setVolume($base.'layers/Audio', 0.5);            // Layer: volume
-  setVolume($base.'layers/Audio/variants/v1', 0.3); // Variant: volume
-  setVolume($base.'sources/Camera1', 1.2);         // Source: gain
+  setVolume($base, 0.8);                                    // Document: programOutputMasterVolume
+  setVolume($base.'layers/MEa', 0.5);                       // Layer: volume
+  setVolume($base.'layers/JoPhi DEMOS/variants/stop', 0.3); // Variant: volume
+  setVolume($base.'sources/a1', 1.2);                       // Source: gain
   ```
   *Note: This is a convenience wrapper around `setValue()` that automatically selects the correct property name (`programOutputMasterVolume`, `volume`, or `gain`) based on whether you're targeting a document, layer/variant, or source.*
 
@@ -105,13 +92,47 @@ These are the officially supported commands for controlling mimoLive:
 
 - **`butOnlyIf($path, $operator, $value1, $value2=null)`** - Conditionally execute or skip the queued actions
   ```php
-  setLive($base.'layers/Comments');
-  butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live');
+  // Only turn off layers if ducking is disabled
+  setOff($base.'layers/Comments');
+  setOff($base.'layers/MEv');
+  setOff($base.'layers/MEa');
+  butOnlyIf($base.'layers/MEa/attributes/tvGroup_Ducking__Enabled', '==', false);
   ```
 
 ### Helper Functions
 
-These functions are available but are typically used internally or for advanced use cases:
+These functions simplify common tasks:
+
+- **`mimoColor($color_string)`** - Convert color strings to mimoLive color format
+  ```php
+  // Hex format (1-8 characters)
+  mimoColor('#F')          // → Gray (#FFFFFFAA)
+  mimoColor('#FF')         // → Gray with alpha (#FFFFFFAA)
+  mimoColor('#F73')        // → RGB shorthand (#FF7733FF)
+  mimoColor('#F73A')       // → RGBA shorthand (#FF7733AA)
+  mimoColor('#FF5733')     // → Full RGB (#FF5733FF)
+  mimoColor('#FF5733AA')   // → Full RGBA (#FF5733AA)
+
+  // RGB/RGBA format (0-255)
+  mimoColor('255,128,64')      // → RGB
+  mimoColor('255,128,64,200')  // → RGBA
+
+  // Percentage format
+  mimoColor('100%,50%,25%')       // → RGB
+  mimoColor('100%,50%,25%,80%')   // → RGBA
+
+  // Use in setValue with color properties
+  setValue($base.'sources/Color', [
+      'input-values' => [
+          'tvGroup_Background__Color' => mimoColor('#FF0000')
+      ]
+  ]);
+  ```
+  *Returns: `['red' => float, 'green' => float, 'blue' => float, 'alpha' => float]` with values 0-1*
+
+### Advanced/Internal Functions
+
+These functions are available but are typically used internally:
 
 - **`wait($seconds)`** - Pause execution without processing frames
   ```php
@@ -130,7 +151,11 @@ These functions are available but are typically used internally or for advanced 
 - **`butOnlyIf($path, $operator, $value1, $value2=null)`** - Conditionally execute or skip the queued actions
   ```php
   setLive($base.'layers/Comments');
-  butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live');
+  butOnlyIf($base.'output-destinations/TV out/live-state', '==', 'live');
+
+  // Only turn off if volume is at 0
+  setOff($base.'layers/MEa');
+  butOnlyIf($base.'layers/MEa/volume', '==', 0);
   ```
 
 ## What is a post condition?
