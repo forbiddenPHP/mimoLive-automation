@@ -12,7 +12,7 @@
         setVolume($base.'layers/MEa', 1);
         setVolume($base.'sources/a1', 1);
         setVolume($base, 0);
-    sleep(0.5);
+    setSleep(0.5);
         setValue($base.'sources/Color', ['input-values' => ['tvGroup_Content__Text_TypeMultiline'=> 'Hello']]);
         setOff($base.'layers/Comments');
         setOff($base.'layers/MEv');
@@ -31,6 +31,6 @@
     setSleep(1);
         setValue($base.'sources/Color', ['input-values' => ['tvGroup_Content__Text_TypeMultiline'=> 'World']]);
         recall($base.'layer-sets/OFF');
-    sleep(0);
+    setSleep(0);
         setOff($base.'output-destinations/TV out');
         setLive($base.'layers/JoPhi DEMOS/variants/stop');

@@ -19,7 +19,11 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
 
 **Note**: For brevity, examples use `$base = 'hosts/master/documents/MyShow/';`
 
-### Control Commands
+### Primary Commands
+
+These are the officially supported commands for controlling mimoLive:
+
+#### Control Commands
 
 - **`setLive($namedAPI_path)`** - Turn a layer or variant live
   ```php
@@ -89,7 +93,7 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
   ```
   *Note: This is a convenience wrapper around `setValue()` that automatically selects the correct property name (`programOutputMasterVolume`, `volume`, or `gain`) based on whether you're targeting a document, layer/variant, or source.*
 
-### Timing Commands
+#### Timing Commands
 
 - **`setSleep($seconds)`** - Process all queued frames for the specified duration
   ```php
@@ -97,12 +101,25 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
   ```
   *Note: For each frame in the duration, queued actions are executed first, then the system sleeps for 1/framerate seconds before advancing to the next frame. The final frame executes without a trailing sleep. Framerate is automatically detected from the mimoLive document metadata (typically 25 or 30 FPS).*
 
+#### Conditional Execution
+
+- **`butOnlyIf($path, $operator, $value1, $value2=null)`** - Conditionally execute or skip the queued actions
+  ```php
+  setLive($base.'layers/Comments');
+  butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live');
+  ```
+
+### Helper Functions
+
+These functions are available but are typically used internally or for advanced use cases:
+
 - **`wait($seconds)`** - Pause execution without processing frames
   ```php
   wait(1.0); // Wait 1 second, no frame processing
   ```
+  *Note: Use `setSleep()` for timed sequences. `wait()` is for simple delays without frame processing.*
 
-- **`run($sleep=0)`** - Execute the automation script 
+- **`run($sleep=0)`** - Execute the automation script (called automatically, rarely needed in user scripts)
   ```php
   run(); // Process immediately
   run(5); // Process with 5 second initial sleep

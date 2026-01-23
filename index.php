@@ -752,7 +752,10 @@ read_script:
         'butonlyif(' => 'butOnlyIf(',
         'setsleep(' => 'setSleep(',
         'setvalue(' => 'setValue(',
-        ];
+        'setvolume(' => 'setVolume(',
+        'wait(' => 'wait(',
+        'run(' => 'run(',
+    ];
     $script = str_ireplace(array_keys($replacements), array_values($replacements), $script);
 
 skip_errors:
@@ -879,23 +882,30 @@ script_functions:
         global $current_frame, $framerate;
 
         $total_frames = max(1, ceil($frac_seconds * $framerate));
-        $frame_sleep = (int)(1000000 / $framerate);
+        $frame_sleep_seconds = 1.0 / $framerate;
 
         for ($i = 0; $i < $total_frames; $i++) {
             process_current_frame();
             $current_frame++;
             if ($i < $total_frames - 1) {
-                usleep($frame_sleep);
+                wait($frame_sleep_seconds);
             }
         }
     }
 
     function wait($seconds) {
-        usleep($seconds * 1000000);
-    }
+        // Split into integer seconds and fractional part
+        // usleep() has limits and doesn't work well with large values
+        $int_seconds = floor($seconds);
+        $frac_seconds = $seconds - $int_seconds;
 
-    function sleep($seconds) {
-        usleep($seconds * 1000000);
+        if ($int_seconds > 0) {
+            sleep($int_seconds);
+        }
+
+        if ($frac_seconds > 0) {
+            usleep((int)($frac_seconds * 1000000));
+        }
     }
 
     function butOnlyIf($path, $comp, $value1=null, $value2=null) {
