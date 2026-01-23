@@ -88,8 +88,8 @@ functions:
                     
                     $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
                     $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
-                    $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layersets', 'pwd' => $pwd_hash];
-                    $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'outputs', 'pwd' => $pwd_hash];
+                    $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
+                    $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
                 }
             }
         }
@@ -168,23 +168,23 @@ functions:
                     }
                 }
 
-                if ($meta['type'] === 'layersets') {
+                if ($meta['type'] === 'layer-sets') {
                     foreach ($data['data'] as $item) {
                         $name = $item['attributes']['name'];
-                        namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layersets/'.$name.'/id', $item['id']);
+                        namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layer-sets/'.$name.'/id', $item['id']);
                         foreach ($item['attributes'] as $attr_key => $attr_value) {
-                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layersets/'.$name.'/'.$attr_key, $attr_value);
+                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layer-sets/'.$name.'/'.$attr_key, $attr_value);
                         }
                     }
                 }
 
-                if ($meta['type'] === 'outputs') {
+                if ($meta['type'] === 'output-destinations') {
                     foreach ($data['data'] as $item) {
-                        // name or title, especially if name does not exisi!
+                        // name or title, especially if name does not exist!
                         $name = $item['attributes']['name'] ?? $item['attributes']['title'];
-                        namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/outputs/'.$name.'/id', $item['id']);
+                        namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/output-destinations/'.$name.'/id', $item['id']);
                         foreach ($item['attributes'] as $attr_key => $attr_value) {
-                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/outputs/'.$name.'/'.$attr_key, $attr_value);
+                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/output-destinations/'.$name.'/'.$attr_key, $attr_value);
                         }
                     }
                 }
@@ -426,9 +426,9 @@ functions:
                 return ['url' => $url, 'pwd' => $pwd_hash];
             }
 
-            if ($parts[4] === 'outputs') {
+            if ($parts[4] === 'output-destinations') {
                 $output_name = $parts[5];
-                $output_id = namedAPI_get('hosts/'.$host_name.'/documents/'.$doc_name.'/outputs/'.$output_name.'/id');
+                $output_id = namedAPI_get('hosts/'.$host_name.'/documents/'.$doc_name.'/output-destinations/'.$output_name.'/id');
 
                 if ($output_id === null) {
                     return null;
@@ -484,7 +484,7 @@ functions:
                 // Check request type
                 $path_parts = explode('/', $action['path']);
                 $is_document_level = (count($path_parts) == 4 && $path_parts[2] === 'documents');
-                $needs_wrapper = (strpos($action['path'], '/outputs/') !== false || strpos($action['path'], '/output-destinations/') !== false);
+                $needs_wrapper = (strpos($action['path'], '/output-destinations/') !== false);
 
                 debug_print("DEBUG setValue: path={$action['path']}, is_document_level=" . ($is_document_level ? 'YES' : 'NO') . ", needs_wrapper=" . ($needs_wrapper ? 'YES' : 'NO') . "\n");
 
@@ -677,12 +677,11 @@ check_translate:
                         $doc_name = $m[2];
                         $result = "hosts/$host/documents/$doc_name";
 
-                        // Find type1 name (layers, layer-sets, outputs, sources)
+                        // Find type1 name (layers, layer-sets, output-destinations, sources)
                         if ($type1 && $id1) {
-                            $type_mapped = ($type1 === 'layer-sets') ? 'layersets' : (($type1 === 'output-destinations') ? 'outputs' : $type1);
                             foreach ($flat as $p => $v) {
-                                if (strpos($p, "$result/$type_mapped/") !== false && strpos($p, '/id') !== false && $v == $id1) {
-                                    preg_match("#$result/$type_mapped/([^/]+)/id#", $p, $m2);
+                                if (strpos($p, "$result/$type1/") !== false && strpos($p, '/id') !== false && $v == $id1) {
+                                    preg_match("#$result/$type1/([^/]+)/id#", $p, $m2);
                                     if ($m2) {
                                         $result .= "/$type1/" . $m2[1];
 
@@ -892,6 +891,10 @@ script_functions:
     }
 
     function wait($seconds) {
+        usleep($seconds * 1000000);
+    }
+
+    function sleep($seconds) {
         usleep($seconds * 1000000);
     }
 
