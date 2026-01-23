@@ -9,7 +9,7 @@ init:
     $OUTPUT=[];
     $queue=[];
     $current_frame=0;
-    $framerate=30; // default, wird aus dokument überschrieben
+    $framerate=30; // default, will be overwritten by the particular document
     $everything_is_fine=false;
     $background_mode=true; // set to true in production
 
@@ -19,7 +19,7 @@ functions:
     
     $hosts = array_get($configuration, 'hosts', default: []);
     
-    // Phase 1: Alle Documents von allen Hosts parallel laden
+    // Phase 1: load all documents in parallel
     $mh = curl_multi_init();
     $curl_handles = [];
     
@@ -49,7 +49,7 @@ functions:
         curl_multi_select($mh);
     } while ($running > 0);
     
-    // Documents verarbeiten
+    // Documents: prepare
     $phase2_queue = [];
     
     foreach ($curl_handles as $info) {
@@ -90,7 +90,7 @@ functions:
     }
     curl_multi_close($mh);
     
-    // Phase 2: Sources, Layers, Layersets, Output-Destinations parallel laden
+    // Phase 2: Sources, Layers, Layersets, Output-Destinations load all parallel
     $mh = curl_multi_init();
     $curl_handles = [];
     
@@ -114,7 +114,7 @@ functions:
         curl_multi_select($mh);
     } while ($running > 0);
     
-    // Phase 2 verarbeiten
+    // Phase 2 preperation
     $phase3_queue = [];
     
     foreach ($curl_handles as $info) {
@@ -187,7 +187,7 @@ functions:
     }
     curl_multi_close($mh);
     
-    // Phase 3: Filters und Variants parallel laden
+    // Phase 3: Filters und Variants load in parallel
     $mh = curl_multi_init();
     $curl_handles = [];
     
@@ -211,7 +211,7 @@ functions:
         curl_multi_select($mh);
     } while ($running > 0);
     
-    // Phase 3 verarbeiten
+    // Phase 3: process
     foreach ($curl_handles as $info) {
         $ch = $info['ch'];
         $meta = $info['meta'];
@@ -249,7 +249,7 @@ functions:
     }
     curl_multi_close($mh);
 
-    // Spezielles "none" Asset für alle Hosts hinzufügen
+    // special "none" asset for all hosts
     foreach ($hosts as $host_name => $host) {
         namedAPI_set('hosts/'.$host_name.'/assets/none', '2124830483-com.mimolive.source.nonesource');
     }
@@ -286,6 +286,19 @@ functions:
     }
     function namedAPI_get($keypath, $delim='/', $default=null) { global $namedAPI; return array_get($namedAPI, $keypath, $delim, $default); }
     function namedAPI_set($keypath, $value, $delim='/') { global $namedAPI; array_set($namedAPI, $keypath, $value, $delim); }
+
+    function array_flat($array, $prefix='', $delim='/') {
+        $result = [];
+        foreach ($array as $key => $value) {
+            $path = $prefix === '' ? $key : $prefix . $delim . $key;
+            if (is_array($value)) {
+                $result = array_merge($result, array_flat($value, $path, $delim));
+            } else {
+                $result[$path] = $value;
+            }
+        }
+        return $result;
+    }
 
     function extract_framerate() {
         global $framerate, $configuration;
@@ -402,7 +415,7 @@ functions:
     }
 
     function process_current_frame() {
-        global $queue, $current_frame;
+        global $queue, $current_frame, $namedAPI;
 
         if (!isset($queue[$current_frame]) || count($queue[$current_frame]) === 0) {
             return;
@@ -410,6 +423,7 @@ functions:
 
         $mh = curl_multi_init();
         $curl_handles = [];
+        $has_recall = false;
 
         foreach ($queue[$current_frame] as $action) {
             $url_data = build_api_url($action['path']);
@@ -431,7 +445,11 @@ functions:
             }
 
             curl_multi_add_handle($mh, $ch);
-            $curl_handles[] = $ch;
+            $curl_handles[] = ['ch' => $ch, 'path' => $action['path'], 'endpoint' => $action['endpoint']];
+
+            if ($action['endpoint'] === 'recall') {
+                $has_recall = true;
+            }
         }
 
         $running = null;
@@ -440,11 +458,28 @@ functions:
             curl_multi_select($mh);
         } while ($running > 0);
 
-        foreach ($curl_handles as $ch) {
+        foreach ($curl_handles as $handle_info) {
+            $ch = $handle_info['ch'];
+            $response = curl_multi_getcontent($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+            if ($http_code === 200 && $response !== false && $handle_info['endpoint'] !== 'recall') {
+                $data = json_decode($response, true);
+                if ($data !== null && isset($data['data']['attributes']['live-state'])) {
+                    $live_state = $data['data']['attributes']['live-state'];
+                    namedAPI_set($handle_info['path'] . '/live-state', $live_state);
+                }
+            }
+
             curl_multi_remove_handle($mh, $ch);
         }
 
         curl_multi_close($mh);
+
+        if ($has_recall) {
+            $namedAPI = [];
+            build_namedAPI();
+        }
 
         unset($queue[$current_frame]);
     }
@@ -474,6 +509,29 @@ config_ini:
 initial_build_namedAPI:
     build_namedAPI();
 
+check_list:
+    if (isset($_GET['list'])) {
+        global $namedAPI, $OUTPUT;
+        $flat = array_flat($namedAPI);
+        $filter = $_GET['list'];
+
+        if (strlen($filter) > 0) {
+            $filtered = [];
+            foreach ($flat as $path => $value) {
+                if (stripos($path, $filter) !== false) {
+                    $filtered[$path] = $value;
+                }
+            }
+            $OUTPUT = $filtered;
+        } else {
+            $OUTPUT = $flat;
+        }
+
+        array_set($OUTPUT, 'code', 200);
+        $everything_is_fine = true;
+        goto input_done;
+    }
+
 read_script:
     $script = array_get($_GET, 'q') ?? trim(' '.str_replace('<?php','',@file_get_contents('scripts/'.array_get($_GET, 'f').'.php'))) ?? '';
     if (strlen(trim($script))==0) {goto error_no_script; }
@@ -502,9 +560,6 @@ input_errors:
         break;
     }
     goto input_done;
-
-
-    
 
 input_done:
     global $OUTPUT;
@@ -566,6 +621,48 @@ script_functions:
 
     function wait($seconds) {
         usleep($seconds * 1000000);
+    }
+
+    function butOnlyIf($path, $comp, $value1=null, $value2=null) {
+        global $queue, $current_frame;
+
+        $current_value = namedAPI_get($path);
+        $result = false;
+
+        switch ($comp) {
+            // we have to trust php's auto-cast here!!!!
+            case '==':
+                $result = ($current_value == $value1);
+                break;
+            case '!=':
+                $result = ($current_value != $value1);
+                break;
+            case '<':
+                $result = ($current_value < $value1);
+                break;
+            case '>':
+                $result = ($current_value > $value1);
+                break;
+            case '<=':
+                $result = ($current_value <= $value1);
+                break;
+            case '>=':
+                $result = ($current_value >= $value1);
+                break;
+            case '<>':
+                $result = ($current_value >= $value1 && $current_value <= $value2);
+                break;
+            case '!<>':
+                $result = !($current_value >= $value1 && $current_value <= $value2);
+                break;
+        }
+
+        if ($result === false) {
+            $queue = [];
+        }
+
+        process_current_frame();
+        $current_frame++;
     }
 
     function run($sleep=0) {

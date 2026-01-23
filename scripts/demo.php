@@ -5,9 +5,12 @@
     setLive($base.'layers/MEv');
     setLive($base.'layers/MEa');
     setSleep(2);
+    
     setOff($base.'layers/Comments');
     setOff($base.'layers/MEv');
     setOff($base.'layers/MEa');
+    butOnlyIf($base.'layers/MEa/attributes/tvGroup_Ducking__Enabled', '==', false);
+    
     setSleep(1);
     recall($base.'layer-sets/RunA');
     setSleep(1);
