@@ -1,10 +1,10 @@
 <?php
-    // script_start:
+    demo_script:
         $base='hosts/master/documents/forbiddenPHP/';
         setLive($base.'output-destinations/TV out');
         setValue($base.'sources/Color', ['input-values' => [
             'tvGroup_Content__Text_TypeMultiline'=> 'Start',
-            'tvGroup_Background__Color' => mimoColor('#0')  // Green
+            'tvGroup_Background__Color' => mimoColor('#EAEAEA99'),
         ]]);
         setVolume($base, 0);
         setVolume($base.'layers/MEa', 0);
@@ -47,7 +47,7 @@
         recall($base.'layer-sets/RunC');
     setSleep(1);
         setValue($base.'sources/Color', ['input-values' => [
-            'tvGroup_Content__Text_TypeMultiline'=> 'World',
+            'tvGroup_Content__Text_TypeMultiline'=> 'Hallo Zucki!',
             'tvGroup_Background__Color' => mimoColor('#FF00FF')  // Magenta
         ]]);
         recall($base.'layer-sets/OFF');

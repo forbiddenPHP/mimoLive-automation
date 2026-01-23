@@ -544,7 +544,7 @@ functions:
                 } else {
                     // Layers, variants, sources, filters use ?update= URL parameter with GET
                     $json_payload = json_encode($action['payload']);
-                    $full_url .= '?update=' . urlencode($json_payload);
+                    $full_url .= '?update=' . rawurlencode($json_payload);
 
                     debug_print("DEBUG: Using GET with ?update= parameter\n");
                     debug_print("DEBUG: JSON payload = $json_payload\n");
