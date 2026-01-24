@@ -527,6 +527,8 @@ functions:
                 $full_url .= '/' . $action['endpoint'];
             }
 
+            debug_print("DEBUG: Executing action - URL: $full_url\n");
+
             $headers = [];
             if (strlen($url_data['pwd']) > 0) {
                 $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
@@ -613,7 +615,11 @@ functions:
                 curl_setopt($ch, CURLOPT_URL, $full_url);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                curl_setopt($ch, CURLOPT_POST, true);
+
+                // openwebbrowser uses GET, all other actions use POST
+                if ($action['endpoint'] !== 'openwebbrowser') {
+                    curl_setopt($ch, CURLOPT_POST, true);
+                }
             }
 
             if (count($headers) > 0) {
@@ -814,6 +820,9 @@ read_script:
         'bouncethroughvariantsbackwards(' => 'bounceThroughVariantsBackwards(',
         'setlivefirstvariant(' => 'setLiveFirstVariant(',
         'setlivelastvariant(' => 'setLiveLastVariant(',
+        'trigger(' => 'trigger(',
+        'snapshot(' => 'snapshot(',
+        'openwebbrowser(' => 'openWebBrowser(',
         'butonlyif(' => 'butOnlyIf(',
         'setsleep(' => 'setSleep(',
         'setvalue(' => 'setValue(',
@@ -1067,6 +1076,190 @@ script_functions:
         }
 
         queue_action($current_frame, $layer_path, 'setLiveLastVariant');
+    }
+
+    function trigger($signal_name, $namedAPI_path) {
+        global $current_frame;
+
+        debug_print("trigger() called: signal_name='$signal_name', path=$namedAPI_path\n");
+
+        // Normalize user's signal name: remove spaces/underscores, lowercase
+        $normalized_search = strtolower(str_replace(['_', ' '], '', $signal_name));
+        debug_print("  Normalized search term: '$normalized_search'\n");
+
+        // Get all input-values for this path
+        $input_values = namedAPI_get($namedAPI_path . '/input-values');
+
+        if ($input_values === null) {
+            debug_print("  WARNING: No input-values found at path $namedAPI_path\n");
+            return;
+        }
+
+        // Find matching signal
+        $found_signal_key = null;
+        foreach ($input_values as $key => $value) {
+            // Only check keys ending with _TypeSignal
+            if (!str_ends_with($key, '_TypeSignal')) {
+                continue;
+            }
+
+            // Extract the part between __ and _TypeSignal
+            // Example: tvGroup_Control__Dis_7_TypeSignal -> Dis_7
+            if (preg_match('/__(.+)_TypeSignal$/', $key, $matches)) {
+                $signal_part = $matches[1];
+                $normalized_key = strtolower(str_replace(['_', ' '], '', $signal_part));
+
+                debug_print("  Checking signal: '$key' -> normalized: '$normalized_key'\n");
+
+                if ($normalized_key === $normalized_search) {
+                    $found_signal_key = $key;
+                    debug_print("  MATCH FOUND: '$key'\n");
+                    break;
+                }
+            }
+        }
+
+        if ($found_signal_key === null) {
+            debug_print("  WARNING: Signal '$signal_name' not found in $namedAPI_path/input-values\n");
+            return;
+        }
+
+        // Build API URL
+        if (build_api_url($namedAPI_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        // Queue the signal trigger action
+        // The endpoint will be: path/signals/SignalID
+        queue_action($current_frame, $namedAPI_path, 'signals/' . $found_signal_key);
+    }
+
+    function snapshot($namedAPI_path, $width=null, $height=null, $format=null, $filepath=null) {
+        debug_print("snapshot() called: path=$namedAPI_path, width=$width, height=$height, format=$format, filepath=$filepath\n");
+
+        // Determine endpoint based on path
+        $is_source = strpos($namedAPI_path, '/sources/') !== false;
+        $endpoint = $is_source ? 'preview' : 'programOut';
+
+        // Default width/height from metadata
+        if ($width === null) {
+            $width = namedAPI_get($namedAPI_path . '/metadata/width');
+            if ($width === null) {
+                $width = 1920;
+                debug_print("  Using default width: $width\n");
+            }
+        }
+        if ($height === null) {
+            $height = namedAPI_get($namedAPI_path . '/metadata/height');
+            if ($height === null) {
+                $height = 1080;
+                debug_print("  Using default height: $height\n");
+            }
+        }
+
+        // Default format
+        if ($format === null) {
+            $format = 'png';
+        }
+
+        // Build filename if filepath not provided
+        if ($filepath === null) {
+            // Get show name from path
+            $parts = explode('/', $namedAPI_path);
+            $show_name = 'Unknown';
+            $device_name = 'PGM Out';  // Default for program output
+
+            // Extract document name (show name)
+            if (isset($parts[3])) {
+                $show_name = $parts[3];
+            }
+
+            // Extract device/source name if it's a source
+            if ($is_source && isset($parts[5])) {
+                $device_name = $parts[5];
+            }
+
+            // Build filename: "ShowName 2026-01-24 12-34-56 DeviceName 1920x1080.png"
+            $timestamp = date('Y-m-d H-i-s');
+            $filename = "{$show_name} {$timestamp} {$device_name} {$width}x{$height}.{$format}";
+            $filepath = "./snapshots/{$filename}";
+        }
+
+        // Ensure snapshots directory exists
+        $dir = dirname($filepath);
+        if (!is_dir($dir)) {
+            if (!mkdir($dir, 0755, true)) {
+                debug_print("  WARNING: Could not create directory $dir\n");
+                return;
+            }
+        }
+
+        // Build API URL with query parameters
+        $url_data = build_api_url($namedAPI_path);
+
+        if ($url_data === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        $full_url = $url_data['url'] . '/' . $endpoint;
+        $full_url .= "?width={$width}&height={$height}&format={$format}";
+
+        debug_print("  Fetching snapshot from: $full_url\n");
+        debug_print("  Saving to: $filepath\n");
+
+        // Fetch the snapshot
+        $ch = curl_init($full_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $image_data = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if ($http_code !== 200 || $image_data === false) {
+            debug_print("  WARNING: Failed to fetch snapshot (HTTP $http_code)\n");
+            return;
+        }
+
+        // Save to file
+        if (file_put_contents($filepath, $image_data) === false) {
+            debug_print("  WARNING: Failed to save snapshot to $filepath\n");
+            return;
+        }
+
+        debug_print("  Snapshot saved successfully (" . strlen($image_data) . " bytes)\n");
+    }
+
+    function openWebBrowser($namedAPI_path) {
+        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path=trim($namedAPI_path);
+        $namedAPI_path=trim($namedAPI_path, '/');
+        global $current_frame;
+        debug_print("openWebBrowser() called: path=$namedAPI_path\n");
+
+        // Validate it's a Web Browser source
+        $source_type = namedAPI_get($namedAPI_path . '/source-type');
+        debug_print("  source-type: " . ($source_type === null ? 'NULL' : "'$source_type'") . "\n");
+        if ($source_type !== 'com.boinx.mimoLive.sources.webBrowserSource') {
+            debug_print("  WARNING: Path is not a Web Browser source (type: $source_type)\n");
+            return;
+        }
+
+        // Build API URL
+        $url_data = build_api_url($namedAPI_path);
+        debug_print("  build_api_url returned: " . ($url_data === null ? 'NULL' : 'valid URL') . "\n");
+        if ($url_data === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        // Queue the openwebbrowser action
+        debug_print("  Queueing openwebbrowser action for frame $current_frame\n");
+        queue_action($current_frame, $namedAPI_path, 'openwebbrowser');
     }
 
     function setValue($namedAPI_path, $updates_array) {

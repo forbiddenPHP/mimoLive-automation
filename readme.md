@@ -6,6 +6,36 @@ A lightweight, procedural PHP automation system for controlling mimoLive via its
 
 The system loads the complete mimoLive API hierarchy (documents, layers, variants, layer-sets, outputs, sources, filters) into a flat named structure accessible via keypaths like `hosts/master/documents/MyShow/layers/Comments/live-state`, making it easy to control and monitor your live production programmatically.
 
+## Installation
+
+1. **Clone this repository**
+   ```bash
+   git clone <repo-url>
+   cd mimoLive-automation
+   ```
+
+2. **Install dependencies**
+   ```bash
+   brew install nginx
+   brew install php
+   ```
+
+3. **Configure nginx**
+   - Set nginx to listen on port `8888` (or any available port)
+   - Point document root to this repository folder
+   - Enable PHP processing via `fastcgi_pass`
+
+4. **Start the server**
+   ```bash
+   brew services start nginx
+   brew services start php
+   ```
+
+5. **Test the setup**
+   ```bash
+   curl http://localhost:8888/?list
+   ```
+
 ## How to call scripts from MimoLive Automation Layer?
   ```
    // Call a prepared Script from scripts-Folder (without .php):
@@ -94,6 +124,53 @@ These are the officially supported commands for controlling mimoLive:
   ```
 
   *Note: All variant cycling functions trigger a namedAPI rebuild to reflect the new state.*
+
+#### Signal Triggering
+
+- **`trigger($signal_name, $path)`** - Trigger a signal on a layer, variant, source, or filter
+  ```php
+  // Trigger signal on a layer
+  trigger('Dis 7', $base.'layers/Video Switcher');
+
+  // Trigger signal on a variant
+  trigger('Cut Below', $base.'layers/Video Switcher/variants/Auto');
+
+  // Trigger signal on a source
+  trigger('Reset', $base.'sources/MySource');
+
+  // Trigger signal on a filter
+  trigger('Pulse', $base.'sources/MySource/filters/MyFilter');
+  ```
+  *Note: Signal names are normalized (spaces and underscores removed, case-insensitive). The function searches for matching signals in the path's input-values that end with `_TypeSignal`. For example, `'Dis 7'` matches `tvGroup_Control__Dis_7_TypeSignal`.*
+
+#### Screenshot/Snapshot
+
+- **`snapshot($path, $width=null, $height=null, $format=null, $filepath=null)`** - Capture screenshot from program output or source preview
+  ```php
+  // Capture program output with defaults (dimensions/format from metadata)
+  snapshot($base);
+
+  // Custom dimensions and format
+  snapshot($base, 1920, 1080, 'png');
+
+  // Custom filepath
+  snapshot($base, 1920, 1080, 'png', './my-snapshots/custom.png');
+
+  // Capture source preview
+  snapshot($base.'sources/Camera 1');
+  ```
+  *Note: Default save path is `./snapshots/` with auto-generated filename: `"ShowName 2026-01-24 12-34-56 DeviceName 1920x1080.png"`. Width/height/format are read from metadata if not specified. For documents, uses `/programOut` endpoint; for sources, uses `/preview` endpoint.*
+
+#### Web Browser Control
+
+- **`openWebBrowser($source_path)`** - Open the browser in a Web Browser Capture source
+  ```php
+  // Open the web browser in a Web Browser source
+  openWebBrowser($base.'sources/Web Browser');
+  ```
+  *Note: This function validates that the source is a Web Browser Capture source (`com.boinx.mimoLive.sources.webBrowserSource`) before sending the command.*
+
+#### Property Updates
 
 - **`setValue($namedAPI_path, $updates_array)`** - Update properties of documents, layers, variants, sources, filters, or outputs
   ```php
