@@ -10,7 +10,7 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
 
 1. **Clone this repository**
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/forbiddenPHP/mimoLive-automation.git
    cd mimoLive-automation
    ```
 
@@ -20,10 +20,34 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
    brew install php
    ```
 
+   **nginx config location on macOS:**
+   - Apple Silicon: `/opt/homebrew/etc/nginx/nginx.conf`
+   - Intel: `/usr/local/etc/nginx/nginx.conf`
+
 3. **Configure nginx**
-   - Set nginx to listen on port `8888` (or any available port)
-   - Point document root to this repository folder
-   - Enable PHP processing via `fastcgi_pass`
+
+   Edit the nginx config file and add the following server block:
+
+   ```nginx
+   server {
+       listen 8888;
+       server_name localhost;
+
+       root /path/to/mimoLive-automation;  # Change this to your repo path
+       index index.php;
+
+       location / {
+           try_files $uri $uri/ /index.php?$query_string;
+       }
+
+       location ~ \.php$ {
+           fastcgi_pass 127.0.0.1:9000;  # or unix:/opt/homebrew/var/run/php-fpm.sock
+           fastcgi_index index.php;
+           fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+           include fastcgi_params;
+       }
+   }
+   ```
 
 4. **Start the server**
    ```bash
