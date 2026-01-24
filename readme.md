@@ -40,12 +40,60 @@ These are the officially supported commands for controlling mimoLive:
   setOff($base.'output-destinations/TV out');
   ```
 
+- **`toggleLive($namedAPI_path)`** - Toggle a layer, variant, or document live state
+  ```php
+  toggleLive($base.'layers/Comments');  // Toggle layer on/off
+  toggleLive($base.'layers/Lower3rd/variants/Red');  // Toggle variant
+  toggleLive($base);  // Toggle document live state
+  ```
+  *Note: After toggleLive executes, the entire namedAPI is rebuilt to reflect the new state.*
+
 - **`recall($namedAPI_path)`** - Recall a layer-set
   ```php
   recall($base.'layer-sets/RunA');
   recall($base.'layer-sets/OFF');
   ```
   *Note: After recall executes, the entire namedAPI is rebuilt to reflect the new state.*
+
+#### Variant Cycling Commands
+
+- **`cycleThroughVariants($layer_path)`** - Cycle to next variant (wraps around to first)
+  ```php
+  cycleThroughVariants($base.'layers/Lower3rd');
+  // Works with variant paths too (will be stripped to layer path):
+  cycleThroughVariants($base.'layers/Lower3rd/variants/Red');
+  ```
+  *Note: Cycles through all variants continuously. After the last variant, returns to the first.*
+
+- **`cycleThroughVariantsBackwards($layer_path)`** - Cycle to previous variant (wraps around to last)
+  ```php
+  cycleThroughVariantsBackwards($base.'layers/Lower3rd');
+  ```
+  *Note: Cycles through all variants in reverse. Before the first variant, returns to the last.*
+
+- **`bounceThroughVariants($layer_path)`** - Cycle to next variant (stops at last)
+  ```php
+  bounceThroughVariants($base.'layers/Lower3rd');
+  ```
+  *Note: Stops at the last variant instead of wrapping around. Safe for linear progressions.*
+
+- **`bounceThroughVariantsBackwards($layer_path)`** - Cycle to previous variant (stops at first)
+  ```php
+  bounceThroughVariantsBackwards($base.'layers/Lower3rd');
+  ```
+  *Note: Stops at the first variant instead of wrapping around.*
+
+- **`setLiveFirstVariant($layer_path)`** - Jump to first variant
+  ```php
+  setLiveFirstVariant($base.'layers/Lower3rd');
+  ```
+
+- **`setLiveLastVariant($layer_path)`** - Jump to last variant
+  ```php
+  setLiveLastVariant($base.'layers/Lower3rd');
+  ```
+
+  *Note: All variant cycling functions trigger a namedAPI rebuild to reflect the new state.*
 
 - **`setValue($namedAPI_path, $updates_array)`** - Update properties of documents, layers, variants, sources, filters, or outputs
   ```php
@@ -102,6 +150,24 @@ These are the officially supported commands for controlling mimoLive:
 ### Helper Functions
 
 These functions simplify common tasks:
+
+- **`getID($path)`** - Get the ID of any resource (device, layer, source, etc.)
+  ```php
+  // Returns the ID from namedAPI path, or none-source ID as fallback
+  $source_id = getID($base.'sources/Color');
+
+  // Use inline in setValue() arrays - this is the power of getID()!
+  setValue($base.'layers/MyLayer', [
+      'source' => getID($base.'sources/Color'),  // Inline usage!
+      'volume' => 0.5
+  ]);
+
+  // Works with any resource type
+  $device_id = getID('hosts/master/devices/MyCamera');
+  $layer_id = getID($base.'layers/Comments');
+  $variant_id = getID($base.'layers/Lower3rd/variants/Red');
+  ```
+  *Returns: The resource ID string, or `'2124830483-com.mimolive.source.nonesource'` if path not found*
 
 - **`mimoColor($color_string)`** - Convert color strings to mimoLive color format
   ```php

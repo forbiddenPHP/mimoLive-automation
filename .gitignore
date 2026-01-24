@@ -4,6 +4,9 @@
 .LSOverride
 ._*
 
+# thisProject
+recordings
+
 # Environment variables
 .env
 .env.local

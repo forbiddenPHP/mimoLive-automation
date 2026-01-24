@@ -1,6 +1,15 @@
 <?php
     demo_script:
+        
         $base='hosts/master/documents/forbiddenPHP/';
+
+        //$devices='hosts/master/devices/';
+        // $sources=$base.'sources/';
+
+        // $l=getID('fehlerhaft');
+        // $l=getID($devices.'Cam Link 4K');
+        // $l=getID($sources.'Color');
+
         setLive($base.'output-destinations/TV out');
         setValue($base.'sources/Color', ['input-values' => [
             'tvGroup_Content__Text_TypeMultiline'=> 'Start',
@@ -54,3 +63,4 @@
     setSleep(0);
         setOff($base.'output-destinations/TV out');
         setLive($base.'layers/JoPhi DEMOS/variants/stop');
+

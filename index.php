@@ -27,29 +27,45 @@ functions:
             global $configuration, $namedAPI;
     
     $hosts = array_get($configuration, 'hosts', default: []);
-    
-    // Phase 1: load all documents in parallel
+
+    // Phase 1: load all documents and devices in parallel
     $mh = curl_multi_init();
     $curl_handles = [];
-    
+
     foreach ($hosts as $host_name => $host) {
         $protocol = array_get($configuration, 'protocol/'.$host_name, default: 'http://');
         $port = array_get($configuration, 'ports/'.$host_name, default: '8989');
         $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
-        
+
+        // Documents
         $url = $protocol . $host . ':' . $port . '/api/v1/documents';
-        
+
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        
+
         if (strlen($pwd_hash) > 0) {
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
         }
-        
+
         curl_multi_add_handle($mh, $ch);
-        $curl_handles[] = ['ch' => $ch, 'host' => $host_name];
+        $curl_handles[] = ['ch' => $ch, 'host' => $host_name, 'type' => 'documents'];
+
+        // Devices
+        $url_devices = $protocol . $host . ':' . $port . '/api/v1/devices';
+
+        $ch_devices = curl_init();
+        curl_setopt($ch_devices, CURLOPT_URL, $url_devices);
+        curl_setopt($ch_devices, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch_devices, CURLOPT_TIMEOUT, 5);
+
+        if (strlen($pwd_hash) > 0) {
+            curl_setopt($ch_devices, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
+        }
+
+        curl_multi_add_handle($mh, $ch_devices);
+        $curl_handles[] = ['ch' => $ch_devices, 'host' => $host_name, 'type' => 'devices'];
     }
     
     $running = null;
@@ -58,42 +74,57 @@ functions:
         curl_multi_select($mh);
     } while ($running > 0);
     
-    // Documents: prepare
+    // Phase 1 processing: Documents and Devices
     $phase2_queue = [];
-    
+
     foreach ($curl_handles as $info) {
         $ch = $info['ch'];
         $host_name = $info['host'];
+        $type = $info['type'];
         $response = curl_multi_getcontent($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        
+
         if ($http_code === 200 && $response !== false) {
             $data = json_decode($response, true);
             if ($data !== null && isset($data['data'])) {
-                
-                foreach ($data['data'] as $doc) {
-                    $doc_id = $doc['id'];
-                    $doc_name = $doc['attributes']['name'];
 
-                    namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/id', $doc_id);
-                    foreach ($doc['attributes'] as $attr_key => $attr_value) {
-                        namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/'.$attr_key, $attr_value);
+                if ($type === 'documents') {
+                    foreach ($data['data'] as $doc) {
+                        $doc_id = $doc['id'];
+                        $doc_name = $doc['attributes']['name'];
+
+                        namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/id', $doc_id);
+                        foreach ($doc['attributes'] as $attr_key => $attr_value) {
+                            namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/'.$attr_key, $attr_value);
+                        }
+
+                        $protocol = array_get($configuration, 'protocol/'.$host_name, default: 'http://');
+                        $port = array_get($configuration, 'ports/'.$host_name, default: '8989');
+                        $host = array_get($configuration, 'hosts/'.$host_name);
+                        $base = $protocol . $host . ':' . $port . '/api/v1/documents/' . $doc_id;
+                        $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
+
+                        $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
+                        $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
+                        $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
+                        $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
                     }
-                    
-                    $protocol = array_get($configuration, 'protocol/'.$host_name, default: 'http://');
-                    $port = array_get($configuration, 'ports/'.$host_name, default: '8989');
-                    $host = array_get($configuration, 'hosts/'.$host_name);
-                    $base = $protocol . $host . ':' . $port . '/api/v1/documents/' . $doc_id;
-                    $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
-                    
-                    $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
-                    $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
-                    $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
-                    $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
+                }
+
+                if ($type === 'devices') {
+                    foreach ($data['data'] as $device) {
+                        $device_id = $device['id'];
+                        $device_name = $device['attributes']['name'];
+
+                        namedAPI_set('hosts/'.$host_name.'/devices/'.$device_name.'/id', $device_id);
+                        foreach ($device['attributes'] as $attr_key => $attr_value) {
+                            namedAPI_set('hosts/'.$host_name.'/devices/'.$device_name.'/'.$attr_key, $attr_value);
+                        }
+                    }
                 }
             }
         }
-        
+
         curl_multi_remove_handle($mh, $ch);
         // curl_close($ch); // deprecated since 8.5! And no need
     }
@@ -164,6 +195,12 @@ functions:
                         foreach ($item['attributes'] as $attr_key => $attr_value) {
                             namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/'.$attr_key, $attr_value);
                         }
+
+                        // Store relationships (variants array and active-variant)
+                        if (isset($item['relationships'])) {
+                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/relationships', $item['relationships']);
+                        }
+
                         $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
                     }
                 }
@@ -331,7 +368,7 @@ functions:
 
         $parts = explode('/', trim($namedAPI_path, '/'));
 
-        if (count($parts) < 4 || $parts[0] !== 'hosts') {
+        if (count($parts) < 3 || $parts[0] !== 'hosts') {
             return null;
         }
 
@@ -346,6 +383,19 @@ functions:
         }
 
         $base = $protocol . $host . ':' . $port . '/api/v1';
+
+        // Handle devices: hosts/$host/devices/$device_name
+        if ($parts[2] === 'devices' && count($parts) >= 4) {
+            $device_name = $parts[3];
+            $device_id = namedAPI_get('hosts/'.$host_name.'/devices/'.$device_name.'/id');
+
+            if ($device_id === null) {
+                return null;
+            }
+
+            $url = $base . '/devices/' . $device_id;
+            return ['url' => $url, 'pwd' => $pwd_hash];
+        }
 
         if ($parts[2] === 'documents' && count($parts) >= 4) {
             $doc_name = $parts[3];
@@ -462,6 +512,8 @@ functions:
         $mh = curl_multi_init();
         $curl_handles = [];
         $has_recall = false;
+        $has_toggleLive = false;
+        $has_variantCycle = false;
 
         foreach ($queue[$current_frame] as $action) {
             $url_data = build_api_url($action['path']);
@@ -574,6 +626,12 @@ functions:
             if ($action['endpoint'] === 'recall') {
                 $has_recall = true;
             }
+            if ($action['endpoint'] === 'toggleLive') {
+                $has_toggleLive = true;
+            }
+            if (in_array($action['endpoint'], ['cycleThroughVariants', 'cycleThroughVariantsBackwards', 'setLiveFirstVariant', 'setLiveLastVariant'])) {
+                $has_variantCycle = true;
+            }
         }
 
         $running = null;
@@ -618,7 +676,7 @@ functions:
 
         curl_multi_close($mh);
 
-        if ($has_recall) {
+        if ($has_recall || $has_toggleLive || $has_variantCycle) {
             $namedAPI = [];
             build_namedAPI();
         }
@@ -748,11 +806,19 @@ read_script:
     $replacements = [
         'setlive(' => 'setLive(',
         'setoff(' => 'setOff(',
+        'togglelive(' => 'toggleLive(',
         'recall(' => 'recall(',
+        'cyclethroughvariants(' => 'cycleThroughVariants(',
+        'cyclethroughvariantsbackwards(' => 'cycleThroughVariantsBackwards(',
+        'bouncethroughvariants(' => 'bounceThroughVariants(',
+        'bouncethroughvariantsbackwards(' => 'bounceThroughVariantsBackwards(',
+        'setlivefirstvariant(' => 'setLiveFirstVariant(',
+        'setlivelastvariant(' => 'setLiveLastVariant(',
         'butonlyif(' => 'butOnlyIf(',
         'setsleep(' => 'setSleep(',
         'setvalue(' => 'setValue(',
         'setvolume(' => 'setVolume(',
+        'getid(' => 'getID(',
         'wait(' => 'wait(',
         'run(' => 'run(',
     ];
@@ -829,12 +895,178 @@ script_functions:
         queue_action($current_frame, $namedAPI_path, 'setOff');
     }
 
+    function toggleLive($namedAPI_path) {
+        global $current_frame;
+        debug_print("toggleLive() called: path=$namedAPI_path\n");
+        $url = build_api_url($namedAPI_path);
+        debug_print("  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
+        if ($url === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+        queue_action($current_frame, $namedAPI_path, 'toggleLive');
+    }
+
     function recall($namedAPI_path) {
         global $current_frame;
         if (build_api_url($namedAPI_path) === null) {
             return;
         }
         queue_action($current_frame, $namedAPI_path, 'recall');
+    }
+
+    function cycleThroughVariants($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("cycleThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'cycleThroughVariants');
+    }
+
+    function cycleThroughVariantsBackwards($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("cycleThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'cycleThroughVariantsBackwards');
+    }
+
+    function bounceThroughVariants($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("bounceThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        // Get relationships to check current variant position
+        $relationships = namedAPI_get($layer_path . '/relationships');
+
+        if ($relationships === null || !isset($relationships['variants']['data'])) {
+            debug_print("  SKIPPED - no relationships/variants data found\n");
+            return;
+        }
+
+        $variants = $relationships['variants']['data'];
+        $active_id = $relationships['active-variant']['data']['id'] ?? null;
+
+        // Find current position
+        $current_index = -1;
+        foreach ($variants as $index => $variant) {
+            if ($variant['id'] === $active_id) {
+                $current_index = $index;
+                break;
+            }
+        }
+
+        debug_print("  Current variant index: $current_index of " . count($variants) . "\n");
+
+        // If at end, don't cycle
+        if ($current_index >= count($variants) - 1) {
+            debug_print("  SKIPPED - already at last variant (bounce limit reached)\n");
+            return;
+        }
+
+        // Otherwise use regular cycle
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'cycleThroughVariants');
+    }
+
+    function bounceThroughVariantsBackwards($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("bounceThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        // Get relationships to check current variant position
+        $relationships = namedAPI_get($layer_path . '/relationships');
+
+        if ($relationships === null || !isset($relationships['variants']['data'])) {
+            debug_print("  SKIPPED - no relationships/variants data found\n");
+            return;
+        }
+
+        $variants = $relationships['variants']['data'];
+        $active_id = $relationships['active-variant']['data']['id'] ?? null;
+
+        // Find current position
+        $current_index = -1;
+        foreach ($variants as $index => $variant) {
+            if ($variant['id'] === $active_id) {
+                $current_index = $index;
+                break;
+            }
+        }
+
+        debug_print("  Current variant index: $current_index of " . count($variants) . "\n");
+
+        // If at beginning, don't cycle
+        if ($current_index <= 0) {
+            debug_print("  SKIPPED - already at first variant (bounce limit reached)\n");
+            return;
+        }
+
+        // Otherwise use regular cycle backwards
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'cycleThroughVariantsBackwards');
+    }
+
+    function setLiveFirstVariant($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("setLiveFirstVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'setLiveFirstVariant');
+    }
+
+    function setLiveLastVariant($namedAPI_path) {
+        global $current_frame;
+
+        // Strip /variants/* if present
+        $layer_path = explode('/variants/', $namedAPI_path)[0];
+
+        debug_print("setLiveLastVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
+
+        if (build_api_url($layer_path) === null) {
+            debug_print("  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        queue_action($current_frame, $layer_path, 'setLiveLastVariant');
     }
 
     function setValue($namedAPI_path, $updates_array) {
@@ -876,6 +1108,21 @@ script_functions:
 
         debug_print("setVolume() called: path=$namedAPI_path, property=$property, value=$value\n");
         setValue($namedAPI_path, [$property => $value]);
+    }
+
+    function getID($path) {
+        $path = trim($path, '/');
+        $path = trim($path);
+        $path = trim($path, '/');
+
+        debug_print("getID() called: path=$path\n");
+        $id = namedAPI_get($path . '/id');
+        if ($id === null) {
+            debug_print("  WARNING: Path not found, returning none-source fallback\n");
+            return '2124830483-com.mimolive.source.nonesource';
+        }
+        debug_print("  Found ID: $id\n");
+        return $id;
     }
 
     function mimoColor($color_string) {
