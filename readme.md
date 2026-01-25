@@ -147,8 +147,6 @@ These are the officially supported commands for controlling mimoLive:
   setLiveLastVariant($base.'layers/Lower3rd');
   ```
 
-  *Note: All variant cycling functions trigger a namedAPI rebuild to reflect the new state.*
-
 #### Signal Triggering
 
 - **`trigger($signal_name, $path)`** - Trigger a signal on a layer, variant, source, or filter
