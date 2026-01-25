@@ -383,11 +383,8 @@ $base = 'hosts/master/documents/MyShow/';
 setLive($base.'layers/Comments');
 setLive($base.'layers/Lower3rd');
 
-// Only execute if YouTube stream is actually live
-butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live');
-
-// Wait 5 seconds
-setSleep(5);
+// Only execute if YouTube stream is actually live, then wait 5 seconds
+butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live', andSleep: 5);
 
 // Turn off graphics (new queue, always executes)
 setOff($base.'layers/Comments');
