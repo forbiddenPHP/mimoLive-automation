@@ -271,8 +271,8 @@ These functions simplify common tasks:
 - **`mimoColor($color_string)`** - Convert color strings to mimoLive color format
   ```php
   // Hex format (1-8 characters)
-  mimoColor('#F')          // → Gray (#FFFFFFAA)
-  mimoColor('#FF')         // → Gray with alpha (#FFFFFFAA)
+  mimoColor('#F')          // → White (#FFFFFFFF)
+  mimoColor('#FA')         // → White, but a bit of transparency (#FFFFFFAA)
   mimoColor('#F73')        // → RGB shorthand (#FF7733FF)
   mimoColor('#F73A')       // → RGBA shorthand (#FF7733AA)
   mimoColor('#FF5733')     // → Full RGB (#FF5733FF)
@@ -335,7 +335,7 @@ These functions are available but are typically used internally:
   setSleep(1, false);  // Execute, wait 1s, no reload
   ```
 
-*Note: `run()` is called automatically at script end and terminates execution. Rarely needed in user scripts.*
+*Note: `run()` is called automatically at script end and terminates execution. Rarely needed in user scripts. If you run it in your script, it ends independently from further following blocks.*
 
 ### Post Condition
 
@@ -447,15 +447,39 @@ The `?translate` endpoint converts mimoLive API URLs into namedAPI keypaths, use
 
 ## Notes
 
-### setValue() and setVolume()
+### Using Standard PHP Control Structures
 
-The `setValue()` function is a universal property updater that works across the entire mimoLive API hierarchy:
-- **Documents**: Set properties like `programOutputMasterVolume`
-- **Layers & Variants**: Set `volume`, `opacity`, `input-values`, etc.
-- **Sources**: Set `gain` and other source properties
-- **Filters**: Set filter `input-values` and parameters
-- **Outputs**: Set output-destination properties
+You can use regular PHP control flow (`if`, `switch`, etc.) to check values before queueing actions:
 
-The `setVolume()` function is a convenience wrapper that automatically chooses the correct volume property based on context, eliminating the need to remember whether to use `programOutputMasterVolume`, `volume`, or `gain`.
+```php
+// Check namedAPI state at script start
+if (namedAPI_get($base.'layers/Comments/live-state') == 'live') {
+    setOff($base.'layers/Comments');
+}
 
+// Check results after executing a block
+setValue($base.'layers/Lower3rd', ['opacity' => 0.5]);
+setSleep(1);
 
+if (namedAPI_get($base.'layers/Lower3rd/opacity') == 0.5) {
+    setLive($base.'layers/Lower3rd');
+}
+
+// Create interactive blocks with switch
+$current_variant = namedAPI_get($base.'layers/Lower3rd/live-variant-name');
+switch ($current_variant) {
+    case 'Red':
+        setLive($base.'layers/Lower3rd/variants/Blue');
+        setSleep(5);
+        break;
+    case 'Blue':
+        setLive($base.'layers/Lower3rd/variants/Green');
+        setSleep(3);
+        break;
+    default:
+        setLive($base.'layers/Lower3rd/variants/Red');
+        setSleep(2);
+}
+```
+
+The namedAPI is reloaded at block boundaries (`setSleep`/`butOnlyIf`), so you can check updated values immediately after.
