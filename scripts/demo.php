@@ -9,7 +9,7 @@
         // $l=getID('fehlerhaft');
         // $l=getID($devices.'Cam Link 4K');
         // $l=getID($sources.'Color');
-
+        setLive($base.'layers/Placer/variants/C');
         setLive($base.'output-destinations/TV out');
         setValue($base.'sources/Color', ['input-values' => [
             'tvGroup_Content__Text_TypeMultiline'=> 'Start',

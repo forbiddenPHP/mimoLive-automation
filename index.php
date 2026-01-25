@@ -511,9 +511,6 @@ functions:
 
         $mh = curl_multi_init();
         $curl_handles = [];
-        $has_recall = false;
-        $has_toggleLive = false;
-        $has_variantCycle = false;
 
         foreach ($queue[$current_frame] as $action) {
             $url_data = build_api_url($action['path']);
@@ -627,17 +624,7 @@ functions:
             }
 
             curl_multi_add_handle($mh, $ch);
-            $curl_handles[] = ['ch' => $ch, 'path' => $action['path'], 'endpoint' => $action['endpoint'], 'payload' => $action['payload']];
-
-            if ($action['endpoint'] === 'recall') {
-                $has_recall = true;
-            }
-            if ($action['endpoint'] === 'toggleLive') {
-                $has_toggleLive = true;
-            }
-            if (in_array($action['endpoint'], ['cycleThroughVariants', 'cycleThroughVariantsBackwards', 'setLiveFirstVariant', 'setLiveLastVariant'])) {
-                $has_variantCycle = true;
-            }
+            $curl_handles[] = ['ch' => $ch];
         }
 
         $running = null;
@@ -648,44 +635,10 @@ functions:
 
         foreach ($curl_handles as $handle_info) {
             $ch = $handle_info['ch'];
-            $response = curl_multi_getcontent($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-            if ($http_code === 200 && $response !== false && $handle_info['endpoint'] !== 'recall') {
-                $data = json_decode($response, true);
-
-                // Update live-state for setLive/setOff
-                if ($data !== null && isset($data['data']['attributes']['live-state'])) {
-                    $live_state = $data['data']['attributes']['live-state'];
-                    namedAPI_set($handle_info['path'] . '/live-state', $live_state);
-                }
-
-                // Update namedAPI for setValue
-                if ($handle_info['payload'] !== null && $data !== null) {
-                    // API returns full updated object - flatten and write back to namedAPI
-                    if (isset($data['data']['attributes'])) {
-                        // Output-destinations: JSON:API format with data/attributes wrapper
-                        $data_flat = array_flat($data['data']['attributes']);
-                    } else {
-                        // Layers, variants, sources, filters: plain object
-                        $data_flat = array_flat($data);
-                    }
-
-                    foreach ($data_flat as $flat_key => $value) {
-                        namedAPI_set($handle_info['path'] . '/' . $flat_key, $value);
-                    }
-                }
-            }
-
             curl_multi_remove_handle($mh, $ch);
         }
 
         curl_multi_close($mh);
-
-        if ($has_recall || $has_toggleLive || $has_variantCycle) {
-            $namedAPI = [];
-            build_namedAPI();
-        }
 
         unset($queue[$current_frame]);
     }
@@ -827,6 +780,9 @@ read_script:
         'setsleep(' => 'setSleep(',
         'setvalue(' => 'setValue(',
         'setvolume(' => 'setVolume(',
+        'mimoposition(' => 'mimoPosition(',
+        'mimocrop(' => 'mimoCrop(',
+        'mimocolor(' => 'mimoColor(',
         'getid(' => 'getID(',
         'wait(' => 'wait(',
         'run(' => 'run(',
@@ -1318,6 +1274,145 @@ script_functions:
         return $id;
     }
 
+    function mimoPosition($prefix, $width, $height, $top, $left, $namedAPI_path) {
+        // Extract document path to get resolution
+        $parts = explode('/', $namedAPI_path);
+        if (count($parts) < 4 || $parts[2] !== 'documents') {
+            debug_print("mimoPosition() ERROR: Invalid path format - expected hosts/.../documents/...\n");
+            return [];
+        }
+
+        $doc_path = implode('/', array_slice($parts, 0, 4));
+
+        // Get document resolution
+        $doc_width = namedAPI_get($doc_path . '/metadata/width');
+        $doc_height = namedAPI_get($doc_path . '/metadata/height');
+
+        if ($doc_width === null || $doc_height === null) {
+            debug_print("mimoPosition() ERROR: Could not get document resolution from $doc_path/metadata\n");
+            return [];
+        }
+
+        // Convert percentage strings to pixel values
+        if (is_string($width) && str_ends_with($width, '%')) {
+            $width = ($doc_width * (float)rtrim($width, '%')) / 100.0;
+        }
+        if (is_string($height) && str_ends_with($height, '%')) {
+            $height = ($doc_height * (float)rtrim($height, '%')) / 100.0;
+        }
+        if (is_string($top) && str_ends_with($top, '%')) {
+            $top = ($doc_height * (float)rtrim($top, '%')) / 100.0;
+        }
+        if (is_string($left) && str_ends_with($left, '%')) {
+            $left = ($doc_width * (float)rtrim($left, '%')) / 100.0;
+        }
+
+        debug_print("mimoPosition(): doc_resolution={$doc_width}x{$doc_height}, requested={$width}x{$height} at top=$top, left=$left\n");
+
+        // Calculate right and bottom distances from edges
+        $right = $doc_width - $left - $width;
+        $bottom = $doc_height - $top - $height;
+
+        // Convert to mimoLive units (0-2 range, where 1 is center)
+        $units_left = ($left / $doc_width) * 2;
+        $units_top = ($top / $doc_height) * 2;
+        $units_right = ($right / $doc_width) * 2;
+        $units_bottom = ($bottom / $doc_height) * 2;
+
+        debug_print("  units: left=$units_left, top=$units_top, right=$units_right, bottom=$units_bottom\n");
+
+        // Build result array with proper key names
+        return [
+            $prefix . '_Left_TypeBoinxX' => $units_left,
+            $prefix . '_Top_TypeBoinxY' => $units_top,
+            $prefix . '_Right_TypeBoinxX' => $units_right,
+            $prefix . '_Bottom_TypeBoinxY' => $units_bottom
+        ];
+    }
+
+    function mimoCrop($prefix, $top, $bottom, $left, $right, $namedAPI_path = null) {
+        // If any value is a pixel number (not a percentage string), we need resolution
+        $needs_resolution = !is_string($top) || !str_ends_with($top, '%') ||
+                           !is_string($bottom) || !str_ends_with($bottom, '%') ||
+                           !is_string($left) || !str_ends_with($left, '%') ||
+                           !is_string($right) || !str_ends_with($right, '%');
+
+        $width = null;
+        $height = null;
+
+        if ($needs_resolution) {
+            if ($namedAPI_path === null) {
+                debug_print("mimoCrop() ERROR: namedAPI_path required when using pixel values\n");
+                return [];
+            }
+
+            // Extract document path
+            $parts = explode('/', $namedAPI_path);
+            if (count($parts) < 4 || $parts[2] !== 'documents') {
+                debug_print("mimoCrop() ERROR: Invalid path format - expected hosts/.../documents/...\n");
+                return [];
+            }
+
+            $doc_path = implode('/', array_slice($parts, 0, 4));
+
+            // Check if path points to a source directly
+            if (strpos($namedAPI_path, '/sources/') !== false) {
+                $summary = namedAPI_get($namedAPI_path . '/summary');
+                if ($summary !== null) {
+                    // Parse summary: "Dynamic. 1920 × 1080 px" or "Image. 886 × 886"
+                    if (preg_match('/(\d+)\s*[×x]\s*(\d+)/', $summary, $matches)) {
+                        $width = (int)$matches[1];
+                        $height = (int)$matches[2];
+                    }
+                }
+            }
+
+            // Fallback: use document resolution
+            if ($width === null || $height === null) {
+                $width = namedAPI_get($doc_path . '/metadata/width');
+                $height = namedAPI_get($doc_path . '/metadata/height');
+            }
+
+            if ($width === null || $height === null) {
+                debug_print("mimoCrop() ERROR: Could not determine SOURCE resolution\n");
+                return [];
+            }
+        }
+
+        // Convert values to percentages
+        if (is_string($top) && str_ends_with($top, '%')) {
+            $top_percent = (float)rtrim($top, '%');
+        } else {
+            $top_percent = ($top / $height) * 100.0;
+        }
+
+        if (is_string($bottom) && str_ends_with($bottom, '%')) {
+            $bottom_percent = (float)rtrim($bottom, '%');
+        } else {
+            $bottom_percent = ($bottom / $height) * 100.0;
+        }
+
+        if (is_string($left) && str_ends_with($left, '%')) {
+            $left_percent = (float)rtrim($left, '%');
+        } else {
+            $left_percent = ($left / $width) * 100.0;
+        }
+
+        if (is_string($right) && str_ends_with($right, '%')) {
+            $right_percent = (float)rtrim($right, '%');
+        } else {
+            $right_percent = ($right / $width) * 100.0;
+        }
+
+        // Build result array with proper key names
+        return [
+            $prefix . '_Top' => $top_percent,
+            $prefix . '_Bottom' => $bottom_percent,
+            $prefix . '_Left' => $left_percent,
+            $prefix . '_Right' => $right_percent
+        ];
+    }
+
     function mimoColor($color_string) {
         $color_string = trim($color_string);
 
@@ -1385,8 +1480,8 @@ script_functions:
         return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
     }
 
-    function setSleep($frac_seconds) {
-        global $current_frame, $framerate;
+    function setSleep($frac_seconds, $reloadNamedAPI=true) {
+        global $current_frame, $framerate, $namedAPI;
 
         $total_frames = max(1, ceil($frac_seconds * $framerate));
         $frame_sleep_seconds = 1.0 / $framerate;
@@ -1397,6 +1492,12 @@ script_functions:
             if ($i < $total_frames - 1) {
                 wait($frame_sleep_seconds);
             }
+        }
+
+        // Reload namedAPI after block execution if requested
+        if ($reloadNamedAPI) {
+            $namedAPI = [];
+            build_namedAPI();
         }
     }
 
@@ -1415,8 +1516,8 @@ script_functions:
         }
     }
 
-    function butOnlyIf($path, $comp, $value1=null, $value2=null) {
-        global $queue, $current_frame;
+    function butOnlyIf($path, $comp, $value1=null, $value2=null, $andSleep=0) {
+        global $queue, $current_frame, $namedAPI;
 
         $current_value = namedAPI_get($path);
         $result = false;
@@ -1451,15 +1552,26 @@ script_functions:
 
         if ($result === false) {
             $queue = [];
-        }
+        } else {
+            // Condition was true - execute queue
+            process_current_frame();
+            $current_frame++;
 
-        process_current_frame();
-        $current_frame++;
+            // Optional sleep after execution
+            if ($andSleep > 0) {
+                wait($andSleep);
+            }
+
+            // Always reload namedAPI after successful execution
+            $namedAPI = [];
+            build_namedAPI();
+        }
     }
 
-    function run($sleep=0) {
+    function run($sleep=0, $reloadNamedAPI=false) {
         extract_framerate();
-        setSleep($sleep);
+        setSleep($sleep, $reloadNamedAPI);
+        exit();
     }
 
 execute_user_script:

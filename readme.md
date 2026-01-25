@@ -297,32 +297,58 @@ These functions simplify common tasks:
   ```
   *Returns: `['red' => float, 'green' => float, 'blue' => float, 'alpha' => float]` with values 0-1*
 
+- **`mimoPosition($prefix, $width, $height, $top, $left, $namedAPI_path)`** - Calculate position/dimensions in mimoLive units
+  ```php
+  // Pixel values
+  setValue($base.'layers/MEv/variants/dyn', [
+      'input-values' => [
+          ...mimoPosition('tvGroup_Geometry__Window', 800, 600, 100, 200, $base)
+      ]
+  ]);
+
+  // Percentage values
+  ...mimoPosition('tvGroup_Geometry__Window', '50%', '40%', '10%', '25%', $base)
+  ```
+  *Returns: Array with `_Left_TypeBoinxX`, `_Top_TypeBoinxY`, `_Right_TypeBoinxX`, `_Bottom_TypeBoinxY` keys*
+
+- **`mimoCrop($prefix, $top, $bottom, $left, $right, $namedAPI_path=null)`** - Calculate crop values in percentages
+  ```php
+  // Percentage values (no path needed)
+  ...mimoCrop('tvGroup_Geometry__Crop', '10%', '10%', '5%', '5%')
+
+  // Pixel values (uses source resolution from path)
+  ...mimoCrop('tvGroup_Geometry__Crop', 50, 50, 100, 100, $base.'sources/Camera')
+  ```
+  *Returns: Array with `_Top`, `_Bottom`, `_Left`, `_Right` keys (percentage values)*
+
 ### Advanced/Internal Functions
 
 These functions are available but are typically used internally:
 
-- **`wait($seconds)`** - Pause execution without processing frames
+- **`wait($seconds)`** - Pause execution without processing frames (internal use)
   ```php
   wait(1.0); // Wait 1 second, no frame processing
   ```
-  *Note: Use `setSleep()` for timed sequences. `wait()` is for simple delays without frame processing.*
+  *Note: Use `setSleep()` for timed sequences.*
 
-- **`run($sleep=0)`** - Execute the automation script (called automatically, rarely needed in user scripts)
+- **`setSleep($seconds, $reloadNamedAPI=true)`** - Execute queue and wait (block boundary)
   ```php
-  run(); // Process immediately
-  run(5); // Process with 5 second initial sleep
+  setSleep(2);  // Execute, wait 2s, reload namedAPI
+  setSleep(1, false);  // Execute, wait 1s, no reload
   ```
+
+*Note: `run()` is called automatically at script end and terminates execution. Rarely needed in user scripts.*
 
 ### Post Condition
 
-- **`butOnlyIf($path, $operator, $value1, $value2=null)`** - Conditionally execute or skip the queued actions
+- **`butOnlyIf($path, $operator, $value1, $value2=null, $andSleep=0)`** - Conditionally execute queued actions
   ```php
   setLive($base.'layers/Comments');
-  butOnlyIf($base.'output-destinations/TV out/live-state', '==', 'live');
-
-  // Only turn off if volume is at 0
-  setOff($base.'layers/MEa');
   butOnlyIf($base.'layers/MEa/volume', '==', 0);
+
+  // With sleep after execution
+  setOff($base.'layers/MEa');
+  butOnlyIf($base.'layers/MEa/live-state', '==', 'live', andSleep: 2);
   ```
 
 ## What is a post condition?
