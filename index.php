@@ -16,13 +16,21 @@ init:
 
 
 functions:
-    function debug_print($key, $message) {
-        global $background_mode, $OUTPUT;
+    function debug_print($key, $message, $frame=null) {
+        global $background_mode, $OUTPUT, $current_frame;
         if ($background_mode === false) {
             $key=trim($key);
             $key=trim($key, '/');
             $key=trim($key);
             $key=trim($key, '/');
+
+            // If frame is provided, prepend it to the key
+            if ($frame !== null) {
+                $key = 'frame-' . $frame . '/' . $key;
+            } elseif ($current_frame !== null) {
+                $key = 'frame-' . $current_frame . '/' . $key;
+            }
+
             array_set($OUTPUT, 'debug/'.$key.'[]', trim($message));
         }
     }
@@ -515,7 +523,38 @@ functions:
             $queue[$frame] = [];
         }
 
-        $queue[$frame][] = ['path' => $namedAPI_path, 'endpoint' => $endpoint, 'payload' => $payload];
+        // Check if an action with same path+endpoint already exists
+        $found_index = null;
+        foreach ($queue[$frame] as $index => $existing_action) {
+            if ($existing_action['path'] === $namedAPI_path && $existing_action['endpoint'] === $endpoint) {
+                $found_index = $index;
+                break;
+            }
+        }
+
+        // If found and both have payloads, merge them
+        if ($found_index !== null && $queue[$frame][$found_index]['payload'] !== null && $payload !== null) {
+            // Flatten both payloads
+            $flat_existing = array_flat($queue[$frame][$found_index]['payload']);
+            $flat_new = array_flat($payload);
+
+            // Merge (newer values override older)
+            $flat_merged = array_merge($flat_existing, $flat_new);
+
+            // Reconstruct nested structure using array_set
+            $merged_payload = [];
+            foreach ($flat_merged as $path => $value) {
+                array_set($merged_payload, $path, $value);
+            }
+
+            // Replace existing entry
+            $queue[$frame][$found_index]['payload'] = $merged_payload;
+
+            debug_print($namedAPI_path, "MERGE: Combined payload for $namedAPI_path/$endpoint\n");
+        } else {
+            // Add as new entry
+            $queue[$frame][] = ['path' => $namedAPI_path, 'endpoint' => $endpoint, 'payload' => $payload];
+        }
     }
 
     function process_current_frame() {
@@ -540,7 +579,7 @@ functions:
                 $full_url .= '/' . $action['endpoint'];
             }
 
-            debug_print('general', "DEBUG: Executing action - URL: $full_url\n");
+            debug_print('execution/actions', " Executing action - URL: $full_url\n");
 
             $headers = [];
             if (strlen($url_data['pwd']) > 0) {
@@ -553,7 +592,7 @@ functions:
                 $is_document_level = (count($path_parts) == 4 && $path_parts[2] === 'documents');
                 $needs_wrapper = (strpos($action['path'], '/output-destinations/') !== false);
 
-                debug_print('general', "DEBUG setValue: path={$action['path']}, is_document_level=" . ($is_document_level ? 'YES' : 'NO') . ", needs_wrapper=" . ($needs_wrapper ? 'YES' : 'NO') . "\n");
+                debug_print('execution/setValue', "DEBUG setValue: path={$action['path']}, is_document_level=" . ($is_document_level ? 'YES' : 'NO') . ", needs_wrapper=" . ($needs_wrapper ? 'YES' : 'NO') . "\n");
 
                 // Validate payload keys in debug mode
                 global $namedAPI, $background_mode;
@@ -563,12 +602,12 @@ functions:
                         $old_flat = array_flat($old);
                         $payload_flat = array_flat($action['payload']);
 
-                        debug_print('general', "DEBUG: Validating " . count($payload_flat) . " payload keys\n");
+                        debug_print($action['path'], " Validating " . count($payload_flat) . " payload keys\n");
 
                         foreach (array_keys($payload_flat) as $key) {
                             if (!array_key_exists($key, $old_flat)) {
-                                debug_print('general', "WARNING: key '$key' not found in namedAPI\n");
-                                debug_print('general', "         This will likely not work. Check spelling and capitalization!\n");
+                                debug_print($action['path'], "WARNING: key '$key' not found in namedAPI\n");
+                                debug_print($action['path'], "         This will likely not work. Check spelling and capitalization!\n");
                             }
                         }
                     }
@@ -582,9 +621,9 @@ functions:
                         ]
                     ];
 
-                    debug_print('general', "DEBUG: Using PUT with JSON:API wrapper\n");
-                    debug_print('general', "DEBUG: URL = $full_url\n");
-                    debug_print('general', "DEBUG: Payload = " . json_encode($payload) . "\n");
+                    debug_print($action['path'], " Using PUT with JSON:API wrapper\n");
+                    debug_print($action['path'], " URL = $full_url\n");
+                    debug_print($action['path'], " Payload = " . json_encode($payload) . "\n");
 
                     $ch = curl_init();
                     curl_setopt($ch, CURLOPT_URL, $full_url);
@@ -597,9 +636,9 @@ functions:
                     // Document-level properties use PUT without wrapper
                     $json_payload = json_encode($action['payload']);
 
-                    debug_print('general', "DEBUG: Using PUT without wrapper for document-level\n");
-                    debug_print('general', "DEBUG: URL = $full_url\n");
-                    debug_print('general', "DEBUG: Payload = $json_payload\n");
+                    debug_print($action['path'], " Using PUT without wrapper for document-level\n");
+                    debug_print($action['path'], " URL = $full_url\n");
+                    debug_print($action['path'], " Payload = $json_payload\n");
 
                     $ch = curl_init();
                     curl_setopt($ch, CURLOPT_URL, $full_url);
@@ -613,9 +652,9 @@ functions:
                     $json_payload = json_encode($action['payload']);
                     $full_url .= '?update=' . rawurlencode($json_payload);
 
-                    debug_print('general', "DEBUG: Using GET with ?update= parameter\n");
-                    debug_print('general', "DEBUG: JSON payload = $json_payload\n");
-                    debug_print('general', "DEBUG: Final URL = $full_url\n");
+                    debug_print($action['path'], " Using GET with ?update= parameter\n");
+                    debug_print($action['path'], " JSON payload = $json_payload\n");
+                    debug_print($action['path'], " Final URL = $full_url\n");
 
                     $ch = curl_init();
                     curl_setopt($ch, CURLOPT_URL, $full_url);
@@ -776,7 +815,7 @@ read_script:
     $script = array_get($_GET, 'q') ?? trim(' '.str_replace('<?php','',@file_get_contents('scripts/'.array_get($_GET, 'f').'.php'))) ?? '';
     if (strlen(trim($script))==0) {goto error_no_script; }
 
-    $script = $script.'; setSleep(0, false);';
+    $script = $script."\n"."// Automatic script end:\n".';'."\n".'setSleep(0, false);';
 
     $replacements = [
         'setlive(' => 'setLive(',
@@ -808,7 +847,12 @@ read_script:
 skip_errors:
     array_set($OUTPUT, 'code', 200);
     array_set($OUTPUT, 'message', 'WOOHOO! I received a script!');
-    array_set($OUTPUT, 'script', $script);
+    $script_array=array_filter(explode("\n", $script));
+    $trimmed_script=[];
+    foreach($script_array as $key => $lines) {
+        $trimmed_script[$key]=trim(str_replace(["\n", "\t", '  '], '', $lines));
+    }
+    array_set($OUTPUT, 'script', $trimmed_script);
     $everything_is_fine=true;
 
     goto input_done;
@@ -858,11 +902,11 @@ skipped:
 script_functions:
     function setLive($namedAPI_path) {
         global $current_frame;
-        debug_print('general', "setLive() called: path=$namedAPI_path\n");
+        debug_print($namedAPI_path, "setLive() called: path=$namedAPI_path\n");
         $url = build_api_url($namedAPI_path);
-        debug_print('general', "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
+        debug_print($namedAPI_path, "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
         if ($url === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
         queue_action($current_frame, $namedAPI_path, 'setLive');
@@ -878,11 +922,11 @@ script_functions:
 
     function toggleLive($namedAPI_path) {
         global $current_frame;
-        debug_print('general', "toggleLive() called: path=$namedAPI_path\n");
+        debug_print($namedAPI_path, "toggleLive() called: path=$namedAPI_path\n");
         $url = build_api_url($namedAPI_path);
-        debug_print('general', "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
+        debug_print($namedAPI_path, "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
         if ($url === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
         queue_action($current_frame, $namedAPI_path, 'toggleLive');
@@ -902,10 +946,10 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "cycleThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "cycleThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -918,10 +962,10 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "cycleThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "cycleThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -934,13 +978,13 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "bounceThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "bounceThroughVariants() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         // Get relationships to check current variant position
         $relationships = namedAPI_get($layer_path . '/relationships');
 
         if ($relationships === null || !isset($relationships['variants']['data'])) {
-            debug_print('general', "  SKIPPED - no relationships/variants data found\n");
+            debug_print($layer_path, "  SKIPPED - no relationships/variants data found\n");
             return;
         }
 
@@ -956,17 +1000,17 @@ script_functions:
             }
         }
 
-        debug_print('general', "  Current variant index: $current_index of " . count($variants) . "\n");
+        debug_print($layer_path, "  Current variant index: $current_index of " . count($variants) . "\n");
 
         // If at end, don't cycle
         if ($current_index >= count($variants) - 1) {
-            debug_print('general', "  SKIPPED - already at last variant (bounce limit reached)\n");
+            debug_print($layer_path, "  SKIPPED - already at last variant (bounce limit reached)\n");
             return;
         }
 
         // Otherwise use regular cycle
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -979,13 +1023,13 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "bounceThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "bounceThroughVariantsBackwards() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         // Get relationships to check current variant position
         $relationships = namedAPI_get($layer_path . '/relationships');
 
         if ($relationships === null || !isset($relationships['variants']['data'])) {
-            debug_print('general', "  SKIPPED - no relationships/variants data found\n");
+            debug_print($layer_path, "  SKIPPED - no relationships/variants data found\n");
             return;
         }
 
@@ -1001,17 +1045,17 @@ script_functions:
             }
         }
 
-        debug_print('general', "  Current variant index: $current_index of " . count($variants) . "\n");
+        debug_print($layer_path, "  Current variant index: $current_index of " . count($variants) . "\n");
 
         // If at beginning, don't cycle
         if ($current_index <= 0) {
-            debug_print('general', "  SKIPPED - already at first variant (bounce limit reached)\n");
+            debug_print($layer_path, "  SKIPPED - already at first variant (bounce limit reached)\n");
             return;
         }
 
         // Otherwise use regular cycle backwards
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -1024,10 +1068,10 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "setLiveFirstVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "setLiveFirstVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -1040,10 +1084,10 @@ script_functions:
         // Strip /variants/* if present
         $layer_path = explode('/variants/', $namedAPI_path)[0];
 
-        debug_print('general', "setLiveLastVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
+        debug_print($layer_path, "setLiveLastVariant() called: path=$namedAPI_path, layer_path=$layer_path\n");
 
         if (build_api_url($layer_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($layer_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -1053,17 +1097,17 @@ script_functions:
     function trigger($signal_name, $namedAPI_path) {
         global $current_frame;
 
-        debug_print('general', "trigger() called: signal_name='$signal_name', path=$namedAPI_path\n");
+        debug_print($namedAPI_path, "trigger() called: signal_name='$signal_name', path=$namedAPI_path\n");
 
         // Normalize user's signal name: remove spaces/underscores, lowercase
         $normalized_search = strtolower(str_replace(['_', ' '], '', $signal_name));
-        debug_print('general', "  Normalized search term: '$normalized_search'\n");
+        debug_print($namedAPI_path, "  Normalized search term: '$normalized_search'\n");
 
         // Get all input-values for this path
         $input_values = namedAPI_get($namedAPI_path . '/input-values');
 
         if ($input_values === null) {
-            debug_print('general', "  WARNING: No input-values found at path $namedAPI_path\n");
+            debug_print($namedAPI_path, "  WARNING: No input-values found at path $namedAPI_path\n");
             return;
         }
 
@@ -1081,24 +1125,24 @@ script_functions:
                 $signal_part = $matches[1];
                 $normalized_key = strtolower(str_replace(['_', ' '], '', $signal_part));
 
-                debug_print('general', "  Checking signal: '$key' -> normalized: '$normalized_key'\n");
+                debug_print($namedAPI_path, "  Checking signal: '$key' -> normalized: '$normalized_key'\n");
 
                 if ($normalized_key === $normalized_search) {
                     $found_signal_key = $key;
-                    debug_print('general', "  MATCH FOUND: '$key'\n");
+                    debug_print($namedAPI_path, "  MATCH FOUND: '$key'\n");
                     break;
                 }
             }
         }
 
         if ($found_signal_key === null) {
-            debug_print('general', "  WARNING: Signal '$signal_name' not found in $namedAPI_path/input-values\n");
+            debug_print($namedAPI_path, "  WARNING: Signal '$signal_name' not found in $namedAPI_path/input-values\n");
             return;
         }
 
         // Build API URL
         if (build_api_url($namedAPI_path) === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
@@ -1108,7 +1152,7 @@ script_functions:
     }
 
     function snapshot($namedAPI_path, $width=null, $height=null, $format=null, $filepath=null) {
-        debug_print('general', "snapshot() called: path=$namedAPI_path, width=$width, height=$height, format=$format, filepath=$filepath\n");
+        debug_print($namedAPI_path, "snapshot() called: path=$namedAPI_path, width=$width, height=$height, format=$format, filepath=$filepath\n");
 
         // Determine endpoint based on path
         $is_source = strpos($namedAPI_path, '/sources/') !== false;
@@ -1119,14 +1163,14 @@ script_functions:
             $width = namedAPI_get($namedAPI_path . '/metadata/width');
             if ($width === null) {
                 $width = 1920;
-                debug_print('general', "  Using default width: $width\n");
+                debug_print($namedAPI_path, "  Using default width: $width\n");
             }
         }
         if ($height === null) {
             $height = namedAPI_get($namedAPI_path . '/metadata/height');
             if ($height === null) {
                 $height = 1080;
-                debug_print('general', "  Using default height: $height\n");
+                debug_print($namedAPI_path, "  Using default height: $height\n");
             }
         }
 
@@ -1162,7 +1206,7 @@ script_functions:
         $dir = dirname($filepath);
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
-                debug_print('general', "  WARNING: Could not create directory $dir\n");
+                debug_print($namedAPI_path, "  WARNING: Could not create directory $dir\n");
                 return;
             }
         }
@@ -1171,15 +1215,15 @@ script_functions:
         $url_data = build_api_url($namedAPI_path);
 
         if ($url_data === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
         $full_url = $url_data['url'] . '/' . $endpoint;
         $full_url .= "?width={$width}&height={$height}&format={$format}";
 
-        debug_print('general', "  Fetching snapshot from: $full_url\n");
-        debug_print('general', "  Saving to: $filepath\n");
+        debug_print($namedAPI_path, "  Fetching snapshot from: $full_url\n");
+        debug_print($namedAPI_path, "  Saving to: $filepath\n");
 
         // Fetch the snapshot
         $ch = curl_init($full_url);
@@ -1193,17 +1237,17 @@ script_functions:
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
         if ($http_code !== 200 || $image_data === false) {
-            debug_print('general', "  WARNING: Failed to fetch snapshot (HTTP $http_code)\n");
+            debug_print($namedAPI_path, "  WARNING: Failed to fetch snapshot (HTTP $http_code)\n");
             return;
         }
 
         // Save to file
         if (file_put_contents($filepath, $image_data) === false) {
-            debug_print('general', "  WARNING: Failed to save snapshot to $filepath\n");
+            debug_print($namedAPI_path, "  WARNING: Failed to save snapshot to $filepath\n");
             return;
         }
 
-        debug_print('general', "  Snapshot saved successfully (" . strlen($image_data) . " bytes)\n");
+        debug_print($namedAPI_path, "  Snapshot saved successfully (" . strlen($image_data) . " bytes)\n");
     }
 
     function openWebBrowser($namedAPI_path) {
@@ -1211,26 +1255,26 @@ script_functions:
         $namedAPI_path=trim($namedAPI_path);
         $namedAPI_path=trim($namedAPI_path, '/');
         global $current_frame;
-        debug_print('general', "openWebBrowser() called: path=$namedAPI_path\n");
+        debug_print($namedAPI_path, "openWebBrowser() called: path=$namedAPI_path\n");
 
         // Validate it's a Web Browser source
         $source_type = namedAPI_get($namedAPI_path . '/source-type');
-        debug_print('general', "  source-type: " . ($source_type === null ? 'NULL' : "'$source_type'") . "\n");
+        debug_print($namedAPI_path, "  source-type: " . ($source_type === null ? 'NULL' : "'$source_type'") . "\n");
         if ($source_type !== 'com.boinx.mimoLive.sources.webBrowserSource') {
-            debug_print('general', "  WARNING: Path is not a Web Browser source (type: $source_type)\n");
+            debug_print($namedAPI_path, "  WARNING: Path is not a Web Browser source (type: $source_type)\n");
             return;
         }
 
         // Build API URL
         $url_data = build_api_url($namedAPI_path);
-        debug_print('general', "  build_api_url returned: " . ($url_data === null ? 'NULL' : 'valid URL') . "\n");
+        debug_print($namedAPI_path, "  build_api_url returned: " . ($url_data === null ? 'NULL' : 'valid URL') . "\n");
         if ($url_data === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
 
         // Queue the openwebbrowser action
-        debug_print('general', "  Queueing openwebbrowser action for frame $current_frame\n");
+        debug_print($namedAPI_path, "  Queueing openwebbrowser action for frame $current_frame\n");
         queue_action($current_frame, $namedAPI_path, 'openwebbrowser');
     }
 
@@ -1239,11 +1283,11 @@ script_functions:
         $namedAPI_path=trim($namedAPI_path);
         $namedAPI_path=trim($namedAPI_path, '/');
         global $current_frame;
-        debug_print('general', "setValue() called: path=$namedAPI_path\n");
+        debug_print($namedAPI_path, "setValue() called: path=$namedAPI_path\n");
         $url = build_api_url($namedAPI_path);
-        debug_print('general', "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
+        debug_print($namedAPI_path, "  build_api_url returned: " . ($url === null ? 'NULL' : 'valid URL') . "\n");
         if ($url === null) {
-            debug_print('general', "  SKIPPED - build_api_url returned null\n");
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
             return;
         }
         queue_action($current_frame, $namedAPI_path, '', $updates_array);
@@ -1267,11 +1311,11 @@ script_functions:
             // Layer or variant level: volume
             $property = 'volume';
         } else {
-            debug_print('general', "setVolume() ERROR: Unknown path type for $namedAPI_path\n");
+            debug_print($namedAPI_path, "setVolume() ERROR: Unknown path type for $namedAPI_path\n");
             return;
         }
 
-        debug_print('general', "setVolume() called: path=$namedAPI_path, property=$property, value=$value\n");
+        debug_print($namedAPI_path, "setVolume() called: path=$namedAPI_path, property=$property, value=$value\n");
         setValue($namedAPI_path, [$property => $value]);
     }
 
@@ -1280,13 +1324,13 @@ script_functions:
         $path = trim($path);
         $path = trim($path, '/');
 
-        debug_print('general', "getID() called: path=$path\n");
+        debug_print($path, "getID() called: path=$path\n");
         $id = namedAPI_get($path . '/id');
         if ($id === null) {
-            debug_print('general', "  WARNING: Path not found, returning none-source fallback\n");
+            debug_print($path, "  WARNING: Path not found, returning none-source fallback\n");
             return '2124830483-com.mimolive.source.nonesource';
         }
-        debug_print('general', "  Found ID: $id\n");
+        debug_print($path, "  Found ID: $id\n");
         return $id;
     }
 
@@ -1294,7 +1338,7 @@ script_functions:
         // Extract document path to get resolution
         $parts = explode('/', $namedAPI_path);
         if (count($parts) < 4 || $parts[2] !== 'documents') {
-            debug_print('general', "mimoPosition() ERROR: Invalid path format - expected hosts/.../documents/...\n");
+            debug_print($namedAPI_path, "mimoPosition() ERROR: Invalid path format - expected hosts/.../documents/...\n");
             return [];
         }
 
@@ -1305,7 +1349,7 @@ script_functions:
         $doc_height = namedAPI_get($doc_path . '/metadata/height');
 
         if ($doc_width === null || $doc_height === null) {
-            debug_print('general', "mimoPosition() ERROR: Could not get document resolution from $doc_path/metadata\n");
+            debug_print($namedAPI_path, "mimoPosition() ERROR: Could not get document resolution from $doc_path/metadata\n");
             return [];
         }
 
@@ -1323,7 +1367,7 @@ script_functions:
             $left = ($doc_width * (float)rtrim($left, '%')) / 100.0;
         }
 
-        debug_print('general', "mimoPosition(): doc_resolution={$doc_width}x{$doc_height}, requested={$width}x{$height} at top=$top, left=$left\n");
+        debug_print($namedAPI_path, "mimoPosition(): doc_resolution={$doc_width}x{$doc_height}, requested={$width}x{$height} at top=$top, left=$left\n");
 
         // Calculate right and bottom distances from edges
         $right = $doc_width - $left - $width;
@@ -1335,7 +1379,7 @@ script_functions:
         $units_right = ($right / $doc_width) * 2;
         $units_bottom = ($bottom / $doc_height) * 2;
 
-        debug_print('general', "  units: left=$units_left, top=$units_top, right=$units_right, bottom=$units_bottom\n");
+        debug_print($namedAPI_path, "  units: left=$units_left, top=$units_top, right=$units_right, bottom=$units_bottom\n");
 
         // Build result array with proper key names
         return [
@@ -1358,14 +1402,14 @@ script_functions:
 
         if ($needs_resolution) {
             if ($namedAPI_path === null) {
-                debug_print('general', "mimoCrop() ERROR: namedAPI_path required when using pixel values\n");
+                debug_print('mimoCrop', "mimoCrop() ERROR: namedAPI_path required when using pixel values\n");
                 return [];
             }
 
             // Extract document path
             $parts = explode('/', $namedAPI_path);
             if (count($parts) < 4 || $parts[2] !== 'documents') {
-                debug_print('general', "mimoCrop() ERROR: Invalid path format - expected hosts/.../documents/...\n");
+                debug_print($namedAPI_path, "mimoCrop() ERROR: Invalid path format - expected hosts/.../documents/...\n");
                 return [];
             }
 
@@ -1390,7 +1434,7 @@ script_functions:
             }
 
             if ($width === null || $height === null) {
-                debug_print('general', "mimoCrop() ERROR: Could not determine SOURCE resolution\n");
+                debug_print($namedAPI_path, "mimoCrop() ERROR: Could not determine SOURCE resolution\n");
                 return [];
             }
         }
@@ -1457,7 +1501,7 @@ script_functions:
                 // #FF5733AA → #FF5733AA
                 // Already 8 characters
             } else {
-                debug_print('general', "mimoColor() ERROR: Invalid hex color length: $color_string\n");
+                debug_print('mimoColor', "mimoColor() ERROR: Invalid hex color length: $color_string\n");
                 return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
             }
 
@@ -1492,7 +1536,7 @@ script_functions:
             return ['red' => $r, 'green' => $g, 'blue' => $b, 'alpha' => $a];
         }
 
-        debug_print('general', "mimoColor() ERROR: Unknown color format: $color_string\n");
+        debug_print('mimoColor', "mimoColor() ERROR: Unknown color format: $color_string\n");
         return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
     }
 
