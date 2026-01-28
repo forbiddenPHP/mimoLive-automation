@@ -227,6 +227,36 @@ These are the officially supported commands for controlling mimoLive:
   ```
   *Note: This is a convenience wrapper around `setValue()` that automatically selects the correct property name (`programOutputMasterVolume`, `volume`, or `gain`) based on whether you're targeting a document, layer/variant, or source.*
 
+- **`setAnimateVolume($namedAPI_path, $target_value, $steps=null, $fps=null)`** - Animate volume/gain smoothly over time
+  ```php
+  // Animate to 100% volume using default settings (30 steps @ 30fps = 1 second)
+  setAnimateVolume($base.'layers/MEa', 1.0);
+  setSleep(0);  // Execute all queued animation frames
+
+  // Animate with custom step count (60 steps @ 30fps = 2 seconds)
+  setAnimateVolume($base.'layers/MEa', 0.0, 60);
+  setSleep(0);
+
+  // Animate with custom speed (30 steps @ 15fps = 2 seconds, slower)
+  setAnimateVolume($base.'layers/MEa', 0.5, 30, 15);
+  setSleep(0);
+
+  // Fast animation (30 steps @ 60fps = 0.5 seconds)
+  setAnimateVolume($base.'layers/MEa', 1.0, 30, 60);
+  setSleep(0);
+
+  // Multiple layers animated in parallel
+  setAnimateVolume($base.'layers/MEv', 1.0, 30, 30);
+  setAnimateVolume($base.'layers/MEa', 1.0, 30, 30);
+  setSleep(0);  // Both animate together
+  ```
+  *Parameters:*
+  - `$target_value` (required): Target volume (0.0 - 1.0)
+  - `$steps` (optional): Number of steps, defaults to framerate from config.ini (e.g., 30)
+  - `$fps` (optional): Animation speed in frames per second, defaults to framerate from config.ini (e.g., 30)
+
+  *Note: Reads current volume from namedAPI and interpolates to target value. Skips animation if already at target. Multiple animations on different layers in the same frame run in parallel. Like `setVolume()`, automatically handles document/layer/source contexts. Remember to call `setSleep(0)` after queueing animations to execute them.*
+
 #### Timing Commands
 
 - **`setSleep($seconds)`** - Process all queued frames for the specified duration

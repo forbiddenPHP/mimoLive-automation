@@ -370,6 +370,8 @@ functions:
         return $result;
     }
 
+    // TODO: this is wrong. we extract the framerate from the including document! extract_framerate($path) - and $path must be truncated
+    // to the containing document. FRAMERATE is in need, if we QUEUE ACTIONS!
     function extract_framerate() {
         global $framerate, $configuration;
         $hosts = array_get($configuration, 'hosts', default: []);
@@ -705,6 +707,7 @@ defaults:
     array_set($configuration, 'protocol/master', 'http://');
     array_set($configuration, 'pwd-hash/master', ''); // '' = none
     array_set($configuration, 'show/name', 'forbiddenPHP');
+    array_set($configuration, 'framerate/master', 30);
 
 config_ini:
     global $configuration;
@@ -1319,6 +1322,67 @@ script_functions:
         setValue($namedAPI_path, [$property => $value]);
     }
 
+    function setAnimateVolume($namedAPI_path, $target_value, $steps=null, $fps=null) {
+        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path=trim($namedAPI_path);
+        $namedAPI_path=trim($namedAPI_path, '/');
+        global $current_frame, $configuration;
+
+        // Get default framerate from configuration
+        $default_framerate = array_get($configuration, 'framerate/master', default: 30);
+
+        // If steps not provided, use framerate as default
+        if ($steps === null) {
+            $steps = $default_framerate;
+        }
+
+        // If FPS not provided, use framerate as default
+        if ($fps === null) {
+            $fps = $default_framerate;
+        }
+
+        $parts = explode('/', $namedAPI_path);
+
+        // Determine audio property based on path type
+        if (count($parts) == 4 && $parts[2] === 'documents') {
+            $property = 'programOutputMasterVolume';
+        } elseif (strpos($namedAPI_path, '/sources/') !== false) {
+            $property = 'gain';
+        } elseif (strpos($namedAPI_path, '/layers/') !== false) {
+            $property = 'volume';
+        } else {
+            debug_print($namedAPI_path, "setAnimateVolume() ERROR: Unknown path type for $namedAPI_path\n");
+            return;
+        }
+
+        // Get current volume value from namedAPI
+        $current_value = namedAPI_get($namedAPI_path . '/' . $property, default: 0);
+
+        debug_print($namedAPI_path, "setAnimateVolume() called: path=$namedAPI_path, from=$current_value, to=$target_value, steps=$steps, fps=$fps\n");
+
+        // If already at target value, skip animation
+        if (abs($current_value - $target_value) < 0.001) {
+            debug_print($namedAPI_path, "  SKIPPED - already at target value\n");
+            return;
+        }
+
+        // Calculate step increment
+        $step_increment = ($target_value - $current_value) / $steps;
+
+        // Calculate frame increment based on desired FPS
+        $doc_fps = array_get($configuration, 'framerate/master', default: 30);
+        $frame_increment = $doc_fps / $fps;
+
+        // Queue actions for each step (including final target value)
+        for ($i = 0; $i <= $steps; $i++) {
+            $value = $current_value + ($step_increment * $i);
+            $frame = $current_frame + (int)round($i * $frame_increment);
+
+            queue_action($frame, $namedAPI_path, '', [$property => $value]);
+            debug_print($namedAPI_path, "  Frame $frame: $property = $value\n");
+        }
+    }
+
     function getID($path) {
         $path = trim($path, '/');
         $path = trim($path);
@@ -1541,17 +1605,32 @@ script_functions:
     }
 
     function setSleep($frac_seconds, $reloadNamedAPI=true) {
-        global $current_frame, $framerate, $namedAPI;
+        global $current_frame, $namedAPI, $configuration, $queue;
 
-        $total_frames = max(1, ceil($frac_seconds * $framerate));
-        $frame_sleep_seconds = 1.0 / $framerate;
+        // Get framerate from configuration (default to 30 if not set)
+        $framerate = array_get($configuration, 'framerate/master', default: 30);
+        $frame_duration = 1.0 / $framerate;
 
-        for ($i = 0; $i < $total_frames; $i++) {
-            process_current_frame();
+        // Find the highest frame number in the queue
+        $max_queued_frame = $current_frame;
+        if (!empty($queue)) {
+            $max_queued_frame = max(array_keys($queue));
+        }
+
+        // Process all queued frames
+        while ($current_frame <= $max_queued_frame) {
+            process_current_frame();  // Send parallel curls, wait for ALL responses
             $current_frame++;
-            if ($i < $total_frames - 1) {
-                wait($frame_sleep_seconds);
+
+            // Sleep between frames (but not after the last frame)
+            if ($current_frame <= $max_queued_frame) {
+                wait($frame_duration);
             }
+        }
+
+        // After all frames are processed, sleep the requested duration
+        if ($frac_seconds > 0) {
+            wait($frac_seconds);
         }
 
         // Reload namedAPI after block execution if requested
