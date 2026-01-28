@@ -100,14 +100,12 @@ These are the officially supported commands for controlling mimoLive:
   toggleLive($base.'layers/Lower3rd/variants/Red');  // Toggle variant
   toggleLive($base);  // Toggle document live state
   ```
-  *Note: After toggleLive executes, the entire namedAPI is rebuilt to reflect the new state.*
 
 - **`recall($namedAPI_path)`** - Recall a layer-set
   ```php
   recall($base.'layer-sets/RunA');
   recall($base.'layer-sets/OFF');
   ```
-  *Note: After recall executes, the entire namedAPI is rebuilt to reflect the new state.*
 
 #### Variant Cycling Commands
 
@@ -215,7 +213,6 @@ These are the officially supported commands for controlling mimoLive:
   // Multiple properties at once
   setValue($base.'layers/MEa', ['volume' => 0.5, 'opacity' => 0.8]);
   ```
-  *Note: Changes are queued in the current frame and execute in parallel with other actions. The namedAPI is updated after successful execution.*
 
 - **`setVolume($namedAPI_path, $value)`** - Convenient shortcut to set volume/gain across different contexts
   ```php
@@ -255,15 +252,59 @@ These are the officially supported commands for controlling mimoLive:
   - `$steps` (optional): Number of steps, defaults to framerate from config.ini (e.g., 30)
   - `$fps` (optional): Animation speed in frames per second, defaults to framerate from config.ini (e.g., 30)
 
-  *Note: Reads current volume from namedAPI and interpolates to target value. Skips animation if already at target. Multiple animations on different layers in the same frame run in parallel. Like `setVolume()`, automatically handles document/layer/source contexts. Remember to call `setSleep(0)` after queueing animations to execute them.*
+  *Note: Reads current volume from namedAPI and interpolates to target value. Skips animation if already at target. Multiple animations on different layers run in parallel. Like `setVolume()`, automatically handles document/layer/source contexts.*
+
+- **`setAnimateValue($namedAPI_path, $updates_array, $steps=null, $fps=null)`** - Animate any animatable property smoothly over time
+  ```php
+  // Animate opacity and rotation together (30 steps @ 30fps = 1 second)
+  setAnimateValue($base.'layers/Placer', [
+      'input-values' => [
+          'tvGroup_Content__Opacity' => 100,
+          'tvGroup_Geometry__Rotation' => 360
+      ]
+  ]);
+  setSleep(0);
+
+  // Animate color using mimoColor() (20 steps @ 30fps ≈ 0.67 seconds)
+  setAnimateValue($base.'sources/Color', [
+      'input-values' => [
+          'tvGroup_Background__Color' => mimoColor('#b700ff')
+      ]
+  ], 20, 30);
+  setSleep(0);
+
+  // Mix animatable and non-animatable properties
+  setAnimateValue($base.'sources/Color', [
+      'input-values' => [
+          'tvGroup_Content__Text_TypeMultiline' => 'Hello World!',  // Set once on frame 0
+          'tvGroup_Background__Color' => mimoColor('#19e42d'),      // Animated over all frames
+          'tvGroup_Geometry__Rotation' => 180                       // Animated (wheel: shortest path)
+      ]
+  ], 30, 30);
+  setSleep(2);
+  ```
+  *Parameters:*
+  - `$updates_array` (required): Array of properties to animate (same structure as `setValue()`)
+  - `$steps` (optional): Number of steps, defaults to framerate from config.ini
+  - `$fps` (optional): Animation speed in frames per second, defaults to framerate from config.ini
+
+  *Supported property types:*
+  - **number**: Linear interpolation (e.g., opacity, position, size)
+  - **number with degrees (°)**: Wheel animation taking shortest path (e.g., rotation 180° → 0° goes via 90° → 0°, not via 270° → 360° → 0°)
+  - **color**: RGBA component interpolation (use `mimoColor()` for convenient color specification)
+  - **string, bool, index, image**: Not animatable - set once on frame 0
+
+  *Note: Like `setValue()`, accepts nested arrays with multiple properties. Animatable properties (number, color) interpolate smoothly across frames. Non-animatable properties (string, bool, etc.) are set once on the first frame only. Multiple `setAnimateValue()` calls on different resources run in parallel.*
 
 #### Timing Commands
 
-- **`setSleep($seconds)`** - Process all queued frames for the specified duration
+- **`setSleep($seconds, $reloadNamedAPI=true)`** - Execute all queued frames and optionally wait additional time
   ```php
-  setSleep(2.5); // Process frames for 2.5 seconds (executes all frames, sleeps between them)
+  setSleep(0);      // Execute all queued frames, no additional wait
+  setSleep(2.5);    // Execute all queued frames, then wait 2.5 seconds
+  setSleep(1, false); // Execute, wait 1 second, don't reload namedAPI
   ```
-  *Note: For each frame in the duration, queued actions are executed first, then the system sleeps for 1/framerate seconds before advancing to the next frame. The final frame executes without a trailing sleep. Framerate is automatically detected from the mimoLive document metadata (typically 25 or 30 FPS).*
+  *Note: This is the primary execution function. It processes all frames currently in the queue (executing actions in parallel for each frame, with 1/framerate second sleep between frames). After all queued frames are processed, it waits for the specified `$seconds` duration. By default (`$reloadNamedAPI=true`), the namedAPI is rebuilt after execution, making updated values available for subsequent commands. Set to `false` to skip the rebuild if you don't need updated values. Framerate is read from `config.ini` (typically 25 or 30 FPS).*
 
 #### Conditional Execution
 
@@ -512,4 +553,4 @@ switch ($current_variant) {
 }
 ```
 
-The namedAPI is reloaded at block boundaries (`setSleep`/`butOnlyIf`), so you can check updated values immediately after.
+See `setSleep()` documentation for details on when the namedAPI is reloaded.

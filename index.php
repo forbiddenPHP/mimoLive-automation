@@ -895,6 +895,7 @@ input_done:
 
 go_into_background:
     if ($background_mode!==true) {goto skipped;}
+    // mimoLive does not wait longer than 10 seconds, so we have to move everything into the background and provide a fake juhu.
     ob_end_flush();
     flush();
     fastcgi_finish_request();
@@ -1381,6 +1382,359 @@ script_functions:
             queue_action($frame, $namedAPI_path, '', [$property => $value]);
             debug_print($namedAPI_path, "  Frame $frame: $property = $value\n");
         }
+    }
+
+    function setAnimateValue($namedAPI_path, $updates_array, $steps=null, $fps=null) {
+        $namedAPI_path = trim($namedAPI_path, '/');
+        $namedAPI_path = trim($namedAPI_path);
+        $namedAPI_path = trim($namedAPI_path, '/');
+        global $current_frame, $configuration;
+
+        debug_print($namedAPI_path, "setAnimateValue() called: path=$namedAPI_path, updates=" . json_encode($updates_array) . ", steps=$steps, fps=$fps\n");
+
+        // Validate that build_api_url works
+        $url = build_api_url($namedAPI_path);
+        if ($url === null) {
+            debug_print($namedAPI_path, "  SKIPPED - build_api_url returned null\n");
+            return;
+        }
+
+        // Get default framerate from configuration
+        $default_framerate = array_get($configuration, 'framerate/master', default: 30);
+
+        // If steps not provided, use framerate as default
+        if ($steps === null) {
+            $steps = $default_framerate;
+        }
+
+        // If FPS not provided, use framerate as default
+        if ($fps === null) {
+            $fps = $default_framerate;
+        }
+
+        // Calculate frame increment based on desired FPS
+        $doc_fps = array_get($configuration, 'framerate/master', default: 30);
+        $frame_increment = $doc_fps / $fps;
+
+        // Process updates - handle colors specially (don't flatten them)
+        $animations = [];
+
+        // Recursive function to process updates
+        $process_updates = function($array, $prefix = '') use (&$process_updates, &$animations, $namedAPI_path) {
+            foreach ($array as $key => $value) {
+                $current_path = $prefix ? $prefix . '/' . $key : $key;
+
+                // Check if this looks like a color object (has red/green/blue/alpha keys)
+                if (is_array($value) && isset($value['red'], $value['green'], $value['blue'], $value['alpha'])) {
+                    // Treat as color value - don't flatten further
+                    $current_value = namedAPI_get($namedAPI_path . '/' . $current_path);
+                    $type_path = $namedAPI_path . '/' . str_replace('input-values/', 'input-descriptions/', $current_path) . '/type';
+                    $type = namedAPI_get($type_path);
+
+                    if ($type !== null && $current_value !== null) {
+                        $animations[$current_path] = [
+                            'current' => $current_value,
+                            'target' => $value,
+                            'type' => $type
+                        ];
+                        debug_print($namedAPI_path, "  $current_path: type=$type, from=" . json_encode($current_value) . ", to=" . json_encode($value) . "\n");
+                    }
+                } elseif (is_array($value)) {
+                    // Recurse into nested array
+                    $process_updates($value, $current_path);
+                } else {
+                    // Scalar value - process normally
+                    $current_value = namedAPI_get($namedAPI_path . '/' . $current_path);
+                    $type_path = $namedAPI_path . '/' . str_replace('input-values/', 'input-descriptions/', $current_path) . '/type';
+                    $type = namedAPI_get($type_path);
+
+                    if ($type !== null && $current_value !== null) {
+                        $animations[$current_path] = [
+                            'current' => $current_value,
+                            'target' => $value,
+                            'type' => $type
+                        ];
+                        debug_print($namedAPI_path, "  $current_path: type=$type, from=" . json_encode($current_value) . ", to=" . json_encode($value) . "\n");
+                    } else {
+                        if ($type === null) {
+                            debug_print($namedAPI_path, "  WARNING: Could not determine type for $current_path\n");
+                        }
+                        if ($current_value === null) {
+                            debug_print($namedAPI_path, "  WARNING: Could not get current value for $current_path\n");
+                        }
+                    }
+                }
+            }
+        };
+
+        $process_updates($updates_array);
+
+        // Generate frames
+        for ($i = 0; $i <= $steps; $i++) {
+            $frame = $current_frame + (int)round($i * $frame_increment);
+            $frame_payload = [];
+
+            foreach ($animations as $keypath => $anim) {
+                $type = $anim['type'];
+                $current_value = $anim['current'];
+                $target_value = $anim['target'];
+
+                if ($type === 'number') {
+                    // Check if already at target
+                    if (abs($current_value - $target_value) < 0.001) {
+                        $value = $target_value;
+                    } else {
+                        // Check if this is a wheel (angle in degrees)
+                        // keypath = input-values/tvGroup_Appearance__Shadow_Direction
+                        $desc_path = str_replace('input-values/', 'input-descriptions/', $keypath);
+                        $unit_path = $namedAPI_path . '/' . $desc_path . '/value-unit';
+                        $unit = namedAPI_get($unit_path);
+                        $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
+
+                        if ($is_wheel) {
+                            // Wheel animation - calculate shortest path
+                            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
+                            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
+                            $min = namedAPI_get($min_path);
+                            $max = namedAPI_get($max_path);
+
+                            if ($min === null) $min = 0;
+                            if ($max === null) $max = 360;
+
+                            $range = $max - $min;
+
+                            // Calculate shortest path for circular values
+                            $diff = $target_value - $current_value;
+
+                            // Normalize difference to -range/2 ... +range/2
+                            while ($diff > $range / 2) $diff -= $range;
+                            while ($diff < -$range / 2) $diff += $range;
+
+                            $delta = $diff;
+
+                            $step_increment = $delta / $steps;
+                            $value = $current_value + ($step_increment * $i);
+
+                            // Wrap around if needed
+                            while ($value < $min) $value += $range;
+                            while ($value >= $max) $value -= $range;
+                        } else {
+                            // Linear interpolation
+                            $step_increment = ($target_value - $current_value) / $steps;
+                            $value = $current_value + ($step_increment * $i);
+                        }
+                    }
+
+                    array_set($frame_payload, $keypath, $value);
+
+                } elseif ($type === 'color') {
+                    // Interpolate RGBA components
+                    if (is_array($current_value) && is_array($target_value)) {
+                        $color = [];
+                        foreach (['red', 'green', 'blue', 'alpha'] as $comp) {
+                            if (isset($current_value[$comp]) && isset($target_value[$comp])) {
+                                $increment = ($target_value[$comp] - $current_value[$comp]) / $steps;
+                                $color[$comp] = $current_value[$comp] + ($increment * $i);
+                            }
+                        }
+                        array_set($frame_payload, $keypath, $color);
+                    }
+
+                } else {
+                    // Non-animatable types: just set on current frame
+                    if ($i === 0) {
+                        array_set($frame_payload, $keypath, $target_value);
+                    }
+                }
+            }
+
+            if (!empty($frame_payload)) {
+                queue_action($frame, $namedAPI_path, '', $frame_payload);
+                debug_print($namedAPI_path, "  Frame $frame: " . json_encode($frame_payload) . "\n", $frame);
+            }
+        }
+    }
+
+    function increment($keypath, $amount) {
+        $keypath = trim($keypath, '/');
+        $keypath = trim($keypath);
+        $keypath = trim($keypath, '/');
+
+        debug_print($keypath, "increment() called: keypath=$keypath, amount=$amount\n");
+
+        // Keypath must contain /input-values/
+        if (strpos($keypath, '/input-values/') === false) {
+            debug_print($keypath, "  ERROR: keypath must contain /input-values/\n");
+            return;
+        }
+
+        // Extract namedAPI_path and property name
+        $parts = explode('/input-values/', $keypath);
+        if (count($parts) !== 2) {
+            debug_print($keypath, "  ERROR: Invalid keypath format\n");
+            return;
+        }
+
+        $namedAPI_path = $parts[0];
+        $property_name = $parts[1];
+
+        // Get type from input-descriptions
+        $type_path = $namedAPI_path . '/input-descriptions/' . $property_name . '/type';
+        $type = namedAPI_get($type_path);
+
+        if ($type !== 'number') {
+            debug_print($keypath, "  ERROR: increment() only works on type=number (got type=$type)\n");
+            return;
+        }
+
+        // Get current value
+        $current_value = namedAPI_get($keypath);
+
+        if ($current_value === null) {
+            debug_print($keypath, "  ERROR: Could not get current value from $keypath\n");
+            return;
+        }
+
+        debug_print($keypath, "  Current value: $current_value\n");
+
+        // Calculate new value
+        $new_value = $current_value + $amount;
+
+        // Check if this is a wheel (angle in degrees)
+        $desc_path = str_replace('input-values/', 'input-descriptions/', $keypath);
+        $unit_path = $namedAPI_path . '/' . $desc_path . '/value-unit';
+        $unit = namedAPI_get($unit_path);
+        $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
+
+        if ($is_wheel) {
+            // Wheel: wrap around min/max
+            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
+            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
+            $min = namedAPI_get($min_path);
+            $max = namedAPI_get($max_path);
+
+            if ($min === null) $min = 0;
+            if ($max === null) $max = 360;
+
+            $range = $max - $min;
+
+            // Wrap around
+            while ($new_value < $min) $new_value += $range;
+            while ($new_value >= $max) $new_value -= $range;
+
+            debug_print($keypath, "  Wheel: wrapped to $new_value (min=$min, max=$max)\n");
+        } else {
+            // Slider: clamp to min/max
+            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
+            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
+            $min = namedAPI_get($min_path);
+            $max = namedAPI_get($max_path);
+
+            if ($min !== null && $new_value < $min) {
+                $new_value = $min;
+                debug_print($keypath, "  Clamped to min: $new_value\n");
+            }
+            if ($max !== null && $new_value > $max) {
+                $new_value = $max;
+                debug_print($keypath, "  Clamped to max: $new_value\n");
+            }
+        }
+
+        debug_print($keypath, "  New value: $new_value\n");
+
+        // Use setValue to update
+        setValue($namedAPI_path, ['input-values' => [$property_name => $new_value]]);
+    }
+
+    function decrement($keypath, $amount) {
+        $keypath = trim($keypath, '/');
+        $keypath = trim($keypath);
+        $keypath = trim($keypath, '/');
+
+        debug_print($keypath, "decrement() called: keypath=$keypath, amount=$amount\n");
+
+        // Keypath must contain /input-values/
+        if (strpos($keypath, '/input-values/') === false) {
+            debug_print($keypath, "  ERROR: keypath must contain /input-values/\n");
+            return;
+        }
+
+        // Extract namedAPI_path and property name
+        $parts = explode('/input-values/', $keypath);
+        if (count($parts) !== 2) {
+            debug_print($keypath, "  ERROR: Invalid keypath format\n");
+            return;
+        }
+
+        $namedAPI_path = $parts[0];
+        $property_name = $parts[1];
+
+        // Get type from input-descriptions
+        $type_path = $namedAPI_path . '/input-descriptions/' . $property_name . '/type';
+        $type = namedAPI_get($type_path);
+
+        if ($type !== 'number') {
+            debug_print($keypath, "  ERROR: decrement() only works on type=number (got type=$type)\n");
+            return;
+        }
+
+        // Get current value
+        $current_value = namedAPI_get($keypath);
+
+        if ($current_value === null) {
+            debug_print($keypath, "  ERROR: Could not get current value from $keypath\n");
+            return;
+        }
+
+        debug_print($keypath, "  Current value: $current_value\n");
+
+        // Calculate new value
+        $new_value = $current_value - $amount;
+
+        // Check if this is a wheel (angle in degrees)
+        $desc_path = str_replace('input-values/', 'input-descriptions/', $keypath);
+        $unit_path = $namedAPI_path . '/' . $desc_path . '/value-unit';
+        $unit = namedAPI_get($unit_path);
+        $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
+
+        if ($is_wheel) {
+            // Wheel: wrap around min/max
+            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
+            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
+            $min = namedAPI_get($min_path);
+            $max = namedAPI_get($max_path);
+
+            if ($min === null) $min = 0;
+            if ($max === null) $max = 360;
+
+            $range = $max - $min;
+
+            // Wrap around
+            while ($new_value < $min) $new_value += $range;
+            while ($new_value >= $max) $new_value -= $range;
+
+            debug_print($keypath, "  Wheel: wrapped to $new_value (min=$min, max=$max)\n");
+        } else {
+            // Slider: clamp to min/max
+            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
+            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
+            $min = namedAPI_get($min_path);
+            $max = namedAPI_get($max_path);
+
+            if ($min !== null && $new_value < $min) {
+                $new_value = $min;
+                debug_print($keypath, "  Clamped to min: $new_value\n");
+            }
+            if ($max !== null && $new_value > $max) {
+                $new_value = $max;
+                debug_print($keypath, "  Clamped to max: $new_value\n");
+            }
+        }
+
+        debug_print($keypath, "  New value: $new_value\n");
+
+        // Use setValue to update
+        setValue($namedAPI_path, ['input-values' => [$property_name => $new_value]]);
     }
 
     function getID($path) {
