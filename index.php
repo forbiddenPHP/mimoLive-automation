@@ -9,7 +9,7 @@ init:
     $OUTPUT=[];
     $queue=[];
     $current_frame=0;
-    $framerate=30; // default, will be overwritten by the particular document
+    $framerate=30; // default, will be overwritten by the ini-settings.
     $everything_is_fine=false;
     $background_mode=true; // set to true in production
     if (isset($_GET['test']) && $_GET['test']==true) {$background_mode=false;}
@@ -1555,37 +1555,18 @@ script_functions:
         }
     }
 
-    function increment($keypath, $amount) {
-        $keypath = trim($keypath, '/');
-        $keypath = trim($keypath);
-        $keypath = trim($keypath, '/');
+    // Internal Function
+    function __increment_decrement($base, $var, $val, $operation) {
+        $base = trim($base, '/');
 
-        debug_print($keypath, "increment() called: keypath=$keypath, amount=$amount\n");
-
-        // Keypath must contain /input-values/
-        if (strpos($keypath, '/input-values/') === false) {
-            debug_print($keypath, "  ERROR: keypath must contain /input-values/\n");
-            return;
+        // Auto-detect: if var contains "__", it's an input-value
+        if (strpos($var, '__') !== false) {
+            $keypath = $base . '/input-values/' . $var;
+        } else {
+            $keypath = $base . '/' . $var;
         }
 
-        // Extract namedAPI_path and property name
-        $parts = explode('/input-values/', $keypath);
-        if (count($parts) !== 2) {
-            debug_print($keypath, "  ERROR: Invalid keypath format\n");
-            return;
-        }
-
-        $namedAPI_path = $parts[0];
-        $property_name = $parts[1];
-
-        // Get type from input-descriptions
-        $type_path = $namedAPI_path . '/input-descriptions/' . $property_name . '/type';
-        $type = namedAPI_get($type_path);
-
-        if ($type !== 'number') {
-            debug_print($keypath, "  ERROR: increment() only works on type=number (got type=$type)\n");
-            return;
-        }
+        debug_print($keypath, "$operation() called: base=$base, var=$var, val=$val -> keypath=$keypath\n");
 
         // Get current value
         $current_value = namedAPI_get($keypath);
@@ -1595,146 +1576,83 @@ script_functions:
             return;
         }
 
+        // Check if it's a number
+        if (!is_numeric($current_value)) {
+            debug_print($keypath, "  ERROR: $operation() only works on numeric values (got " . gettype($current_value) . ")\n");
+            return;
+        }
+
         debug_print($keypath, "  Current value: $current_value\n");
 
         // Calculate new value
-        $new_value = $current_value + $amount;
-
-        // Check if this is a wheel (angle in degrees)
-        $desc_path = str_replace('input-values/', 'input-descriptions/', $keypath);
-        $unit_path = $namedAPI_path . '/' . $desc_path . '/value-unit';
-        $unit = namedAPI_get($unit_path);
-        $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
-
-        if ($is_wheel) {
-            // Wheel: wrap around min/max
-            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
-            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
-            $min = namedAPI_get($min_path);
-            $max = namedAPI_get($max_path);
-
-            if ($min === null) $min = 0;
-            if ($max === null) $max = 360;
-
-            $range = $max - $min;
-
-            // Wrap around
-            while ($new_value < $min) $new_value += $range;
-            while ($new_value >= $max) $new_value -= $range;
-
-            debug_print($keypath, "  Wheel: wrapped to $new_value (min=$min, max=$max)\n");
+        if ($operation === 'increment') {
+            $new_value = $current_value + $val;
         } else {
-            // Slider: clamp to min/max
-            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
-            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
-            $min = namedAPI_get($min_path);
-            $max = namedAPI_get($max_path);
-
-            if ($min !== null && $new_value < $min) {
-                $new_value = $min;
-                debug_print($keypath, "  Clamped to min: $new_value\n");
-            }
-            if ($max !== null && $new_value > $max) {
-                $new_value = $max;
-                debug_print($keypath, "  Clamped to max: $new_value\n");
-            }
+            $new_value = $current_value - $val;
         }
 
-        debug_print($keypath, "  New value: $new_value\n");
+        // Check if this is an input-value (has input-descriptions)
+        $is_input_value = strpos($var, '__') !== false;
 
-        // Use setValue to update
-        setValue($namedAPI_path, ['input-values' => [$property_name => $new_value]]);
+        if ($is_input_value) {
+            // Check if this is a wheel (angle in degrees)
+            $unit_path = $base . '/input-descriptions/' . $var . '/value-unit';
+            $unit = namedAPI_get($unit_path);
+            $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
+
+            if ($is_wheel) {
+                // Wheel: wrap around min/max
+                $min_path = $base . '/input-descriptions/' . $var . '/value-min';
+                $max_path = $base . '/input-descriptions/' . $var . '/value-max';
+                $min = namedAPI_get($min_path);
+                $max = namedAPI_get($max_path);
+
+                if ($min === null) $min = 0;
+                if ($max === null) $max = 360;
+
+                $range = $max - $min;
+
+                // Wrap around
+                while ($new_value < $min) $new_value += $range;
+                while ($new_value >= $max) $new_value -= $range;
+
+                debug_print($keypath, "  Wheel: wrapped to $new_value (min=$min, max=$max)\n");
+            } else {
+                // Slider: clamp to min/max
+                $min_path = $base . '/input-descriptions/' . $var . '/value-min';
+                $max_path = $base . '/input-descriptions/' . $var . '/value-max';
+                $min = namedAPI_get($min_path);
+                $max = namedAPI_get($max_path);
+
+                if ($min !== null && $new_value < $min) {
+                    $new_value = $min;
+                    debug_print($keypath, "  Clamped to min: $new_value\n");
+                }
+                if ($max !== null && $new_value > $max) {
+                    $new_value = $max;
+                    debug_print($keypath, "  Clamped to max: $new_value\n");
+                }
+            }
+
+            debug_print($keypath, "  New value: $new_value\n");
+
+            // Use setValue to update input-value
+            setValue($base, ['input-values' => [$var => $new_value]]);
+        } else {
+            // Direct property (volume, gain, opacity, etc.) - no min/max checking
+            debug_print($keypath, "  New value: $new_value\n");
+
+            // Use setValue to update direct property
+            setValue($base, [$var => $new_value]);
+        }
     }
 
-    function decrement($keypath, $amount) {
-        $keypath = trim($keypath, '/');
-        $keypath = trim($keypath);
-        $keypath = trim($keypath, '/');
+    function increment($base, $var, $val) {
+        __increment_decrement($base, $var, $val, 'increment');
+    }
 
-        debug_print($keypath, "decrement() called: keypath=$keypath, amount=$amount\n");
-
-        // Keypath must contain /input-values/
-        if (strpos($keypath, '/input-values/') === false) {
-            debug_print($keypath, "  ERROR: keypath must contain /input-values/\n");
-            return;
-        }
-
-        // Extract namedAPI_path and property name
-        $parts = explode('/input-values/', $keypath);
-        if (count($parts) !== 2) {
-            debug_print($keypath, "  ERROR: Invalid keypath format\n");
-            return;
-        }
-
-        $namedAPI_path = $parts[0];
-        $property_name = $parts[1];
-
-        // Get type from input-descriptions
-        $type_path = $namedAPI_path . '/input-descriptions/' . $property_name . '/type';
-        $type = namedAPI_get($type_path);
-
-        if ($type !== 'number') {
-            debug_print($keypath, "  ERROR: decrement() only works on type=number (got type=$type)\n");
-            return;
-        }
-
-        // Get current value
-        $current_value = namedAPI_get($keypath);
-
-        if ($current_value === null) {
-            debug_print($keypath, "  ERROR: Could not get current value from $keypath\n");
-            return;
-        }
-
-        debug_print($keypath, "  Current value: $current_value\n");
-
-        // Calculate new value
-        $new_value = $current_value - $amount;
-
-        // Check if this is a wheel (angle in degrees)
-        $desc_path = str_replace('input-values/', 'input-descriptions/', $keypath);
-        $unit_path = $namedAPI_path . '/' . $desc_path . '/value-unit';
-        $unit = namedAPI_get($unit_path);
-        $is_wheel = ($unit === '°' || $unit === "\u{00b0}");
-
-        if ($is_wheel) {
-            // Wheel: wrap around min/max
-            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
-            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
-            $min = namedAPI_get($min_path);
-            $max = namedAPI_get($max_path);
-
-            if ($min === null) $min = 0;
-            if ($max === null) $max = 360;
-
-            $range = $max - $min;
-
-            // Wrap around
-            while ($new_value < $min) $new_value += $range;
-            while ($new_value >= $max) $new_value -= $range;
-
-            debug_print($keypath, "  Wheel: wrapped to $new_value (min=$min, max=$max)\n");
-        } else {
-            // Slider: clamp to min/max
-            $min_path = $namedAPI_path . '/' . $desc_path . '/value-min';
-            $max_path = $namedAPI_path . '/' . $desc_path . '/value-max';
-            $min = namedAPI_get($min_path);
-            $max = namedAPI_get($max_path);
-
-            if ($min !== null && $new_value < $min) {
-                $new_value = $min;
-                debug_print($keypath, "  Clamped to min: $new_value\n");
-            }
-            if ($max !== null && $new_value > $max) {
-                $new_value = $max;
-                debug_print($keypath, "  Clamped to max: $new_value\n");
-            }
-        }
-
-        debug_print($keypath, "  New value: $new_value\n");
-
-        // Use setValue to update
-        setValue($namedAPI_path, ['input-values' => [$property_name => $new_value]]);
+    function decrement($base, $var, $val) {
+        __increment_decrement($base, $var, $val, 'decrement');
     }
 
     function getID($path) {

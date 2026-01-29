@@ -296,6 +296,45 @@ These are the officially supported commands for controlling mimoLive:
 
   *Note: Like `setValue()`, accepts nested arrays with multiple properties. Animatable properties (number, color) interpolate smoothly across frames. Non-animatable properties (string, bool, etc.) are set once on the first frame only. Multiple `setAnimateValue()` calls on different resources run in parallel.*
 
+- **`increment($base, $var, $val)`** - Increment a numeric property by a specified amount
+  ```php
+  $placer = 'hosts/master/documents/MyShow/layers/Placer';
+
+  // Increment input-values (auto-detected by __ in variable name)
+  increment($placer, 'tvGroup_Content__Opacity', 10);      // Slider: clamped to min/max
+  increment($placer, 'tvGroup_Geometry__Rotation', 45);    // Wheel: wraps around at 360°
+
+  // Increment direct properties (no __ in variable name)
+  increment($placer, 'volume', 0.2);
+  increment($placer, 'gain', 0.1);
+  ```
+  *Parameters:*
+  - `$base` (required): Base path to the resource (layer, source, output)
+  - `$var` (required): Variable name (use "Copy API Key" from right-click menu on setting label)
+  - `$val` (required): Amount to increment by
+
+  *Behavior:*
+  - **Input-values** (contains `__`): Automatically prefixes `/input-values/` to the path
+  - **Direct properties** (no `__`): Uses path as-is (e.g., `volume`, `gain`)
+  - **Sliders**: Values are clamped to min/max from input-descriptions
+  - **Wheels** (unit = °): Values wrap around (e.g., 350° + 30° = 20°)
+  - Only works on numeric values, returns error for non-numeric types
+
+  ![Right-click on label to copy API key](assets/right-click-on-label.png)
+
+- **`decrement($base, $var, $val)`** - Decrement a numeric property by a specified amount
+  ```php
+  $placer = 'hosts/master/documents/MyShow/layers/Placer';
+
+  // Decrement input-values
+  decrement($placer, 'tvGroup_Content__Opacity', 15);      // Slider: clamped to min/max
+  decrement($placer, 'tvGroup_Geometry__Rotation', 90);    // Wheel: wraps around
+
+  // Decrement direct properties
+  decrement($placer, 'volume', 0.2);
+  ```
+  *Parameters and behavior identical to `increment()`, but subtracts the value instead of adding it.*
+
 #### Timing Commands
 
 - **`setSleep($seconds, $reloadNamedAPI=true)`** - Execute all queued frames and optionally wait additional time
@@ -406,7 +445,7 @@ These functions are available but are typically used internally:
   setSleep(1, false);  // Execute, wait 1s, no reload
   ```
 
-*Note: `run()` is called automatically at script end and terminates execution. Rarely needed in user scripts. If you run it in your script, it ends independently from further following blocks.*
+*Note: If you debug your script, you can use `run();`. It executes the block(s) above and exits afterwards. Following blocks are ignored.*
 
 ### Post Condition
 
@@ -448,12 +487,15 @@ A post condition (`butOnlyIf`) evaluates the current state of the namedAPI **aft
 ```php
 $base = 'hosts/master/documents/MyShow/';
 
-// Queue the Comments layer to go live
-setLive($base.'layers/Comments');
-setLive($base.'layers/Lower3rd');
+label_and_braces_not_necessary_just_to_see_it_better: 
+{
+  // Queue the Comments layer to go live
+  setLive($base.'layers/Comments');
+  setLive($base.'layers/Lower3rd');
 
-// Only execute if YouTube stream is actually live, then wait 5 seconds
-butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live', andSleep: 5);
+  // Only execute if YouTube stream is actually live, then wait 5 seconds
+  butOnlyIf($base.'outputs/YouTube/live-state', '==', 'live', andSleep: 5);
+}
 
 // Turn off graphics (new queue, always executes)
 setOff($base.'layers/Comments');
@@ -464,17 +506,19 @@ setOff($base.'layers/Lower3rd');
 
 ## Debug Helpers for your scripts
 
+Use firefox to call `?list`, `translate` or `?{any}&test=true`. It can render json.
+
 ### List API Keypaths
 
 The `?list` endpoint provides introspection into the current namedAPI state, making it easy to discover available keypaths and their values.
 
 - **`/?list`** - Returns all keypaths with their current values as a flat JSON structure
-  ```bash
+  ```zsh
   curl http://localhost:8888/?list | jq
   ```
 
 - **`/?list=filter`** - Returns only keypaths containing the filter string (case-insensitive)
-  ```bash
+  ```zsh
   # Show all live-state values
   curl http://localhost:8888/?list=live-state | jq
 
@@ -520,7 +564,7 @@ The `?translate` endpoint converts mimoLive API URLs into namedAPI keypaths, use
 
 ### Using Standard PHP Control Structures
 
-You can use regular PHP control flow (`if`, `switch`, etc.) to check values before queueing actions:
+You can use regular PHP control flow (`if`, `switch`, even own functions etc.) to check values before queueing actions or set a block:
 
 ```php
 // Check namedAPI state at script start
