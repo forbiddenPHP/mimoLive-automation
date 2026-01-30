@@ -225,6 +225,7 @@ functions:
 
                             namedAPI_set($doc_path.'/autoGrid/'.$name, [
                                 'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
+                                'audio' => $doc_path . '/layers/a_pos_' . $pos . '_group_' . $group,
                                 'group' => $group,
                                 'position' => $pos
                             ]);
@@ -827,8 +828,17 @@ check_list:
 
         if (strlen($filter) > 0) {
             $filtered = [];
+            // Split filter by spaces - all parts must match
+            $filter_parts = preg_split('/\s+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
             foreach ($flat as $path => $value) {
-                if (stripos($path, $filter) !== false) {
+                $all_match = true;
+                foreach ($filter_parts as $part) {
+                    if (stripos($path, $part) === false) {
+                        $all_match = false;
+                        break;
+                    }
+                }
+                if ($all_match) {
                     $filtered[$path] = $value;
                 }
             }
@@ -2071,6 +2081,7 @@ script_functions:
 
                     foreach ($all_positions as $idx => $position) {
                         $video_layer = $position['video'] ?? null;
+                        $audio_layer = $position['audio'] ?? null;
                         $status = $position['status'] ?? null;
                         if (!$video_layer) continue;
 
@@ -2092,6 +2103,7 @@ script_functions:
 
                         $position_calcs[] = [
                             'video_layer' => $video_layer,
+                            'audio_layer' => $audio_layer,
                             'status' => $status,
                             'x' => $x,
                             'y' => $y_pos,
@@ -2103,6 +2115,7 @@ script_functions:
                     // PHASE 2: Apply all calculated positions
                     foreach ($position_calcs as $calc) {
                         $video_layer = $calc['video_layer'];
+                        $audio_layer = $calc['audio_layer'] ?? null;
                         $status = $calc['status'];
                         $x = $calc['x'];
                         $y = $calc['y'];
@@ -2121,6 +2134,12 @@ script_functions:
                                 ],
                                 'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
                             ]);
+
+                            // Handle optional audio layer
+                            if ($audio_layer) {
+                                setLive($audio_layer);
+                                setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+                            }
                         } else {
                             $video_live_state = namedAPI_get($video_layer . '/live-state');
 
@@ -2137,6 +2156,12 @@ script_functions:
                                         'volume' => 0.0
                                     ]);
                                     $delayed_off[] = $video_layer;
+
+                                    // Handle optional audio layer
+                                    if ($audio_layer) {
+                                        setValue($audio_layer, ['volume' => 0.0]);
+                                        $delayed_off[] = $audio_layer;
+                                    }
                                 }
                             } elseif ($status === 'off') {
                                 setLive($video_layer);
@@ -2150,6 +2175,12 @@ script_functions:
                                     ],
                                     'volume' => 0.0
                                 ]);
+
+                                // Handle optional audio layer
+                                if ($audio_layer) {
+                                    setLive($audio_layer);
+                                    setValue($audio_layer, ['volume' => 0.0]);
+                                }
                             } elseif ($status === 'audio-only') {
                                 setLive($video_layer);
                                 setValue($video_layer, [
@@ -2162,6 +2193,12 @@ script_functions:
                                     ],
                                     'volume' => 1.0
                                 ]);
+
+                                // Handle optional audio layer
+                                if ($audio_layer) {
+                                    setLive($audio_layer);
+                                    setValue($audio_layer, ['volume' => 1.0]);
+                                }
                             }
                         }
                     }
@@ -2327,6 +2364,7 @@ script_functions:
 
             foreach ($all_positions as $position) {
                 $video_layer = $position['video'];
+                $audio_layer = $position['audio'] ?? null;
                 $status = $position['status'];
 
                 if ($status === 'video-and-audio' || $status === 'video-no-audio') {
@@ -2342,6 +2380,12 @@ script_functions:
                         ],
                         'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
                     ]);
+
+                    // Handle optional audio layer
+                    if ($audio_layer) {
+                        setLive($audio_layer);
+                        setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+                    }
                 } else {
                     // Non-visible: shrink to center of group
                     setLive($video_layer);
@@ -2355,6 +2399,12 @@ script_functions:
                         ],
                         'volume' => ($status === 'audio-only') ? 1.0 : 0.0
                     ]);
+
+                    // Handle optional audio layer
+                    if ($audio_layer) {
+                        setLive($audio_layer);
+                        setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+                    }
                 }
             }
             return;
@@ -2402,6 +2452,7 @@ script_functions:
             $y = $group_top + $row * ($base_tile_height + $gap_px);
 
             $video_layer = $position['video'];
+            $audio_layer = $position['audio'] ?? null;
             $status = $position['status'];
 
             setLive($video_layer);
@@ -2415,6 +2466,12 @@ script_functions:
                 ],
                 'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
             ]);
+
+            // Handle optional audio layer
+            if ($audio_layer) {
+                setLive($audio_layer);
+                setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+            }
 
             $visible_idx++;
         }
@@ -2444,6 +2501,7 @@ script_functions:
             $center_y = $y + ($orig_tile_height / 2);
 
             $video_layer = $position['video'];
+            $audio_layer = $position['audio'] ?? null;
 
             setLive($video_layer);
             setValue($video_layer, [
@@ -2456,6 +2514,12 @@ script_functions:
                 ],
                 'volume' => ($status === 'audio-only') ? 1.0 : 0.0
             ]);
+
+            // Handle optional audio layer
+            if ($audio_layer) {
+                setLive($audio_layer);
+                setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+            }
         }
     }
 
