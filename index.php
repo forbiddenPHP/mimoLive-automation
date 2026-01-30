@@ -1813,14 +1813,14 @@ script_functions:
             // EXCLUSIVE MODE: One layer fullscreen, all others shrink to center
             $video_layer = $exclusive_layer_info['video'];
 
-            // Exclusive layer takes full working area (like single element in groups mode)
+            // Exclusive layer takes FULL document (ignoring margins)
             setLive($video_layer);
             setValue($video_layer, [
                 'input-values' => [
-                    ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
+                    ...mimoPosition('tvGroup_Geometry__Window', $doc_width, $doc_height, 0, 0, $document_path),
                     'tvGroup_Appearance__Boarder_Color' => mimoColor($color_highlight),
                     'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.00,
-                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                     'tvGroup_Appearance__Shape' => 2
                 ],
                 'volume' => 1.0
@@ -1852,15 +1852,15 @@ script_functions:
 
         } elseif (!$has_exclusive) {
 
-            // Case: exclusive (fills working area)
+            // Case: exclusive (fills FULL document, ignoring margins)
             if ($status === 'exclusive') {
                 setLive($video_layer);
                 setValue($video_layer, [
                     'input-values' => [
-                        ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
+                        ...mimoPosition('tvGroup_Geometry__Window', $doc_width, $doc_height, 0, 0, $document_path),
                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
                         'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.00,
-                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                         'tvGroup_Appearance__Shape' => 2
                     ],
                     'volume' => 1.0
