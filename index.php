@@ -213,7 +213,33 @@ functions:
                             namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/relationships', $item['relationships']);
                         }
 
-                        $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
+                        // AutoGrid: Build structure for s_av_* layers
+                        $doc_path = 'hosts/'.$meta['host'].'/documents/'.$meta['doc_name'];
+
+                        // s_av_pos_N_group_X
+                        if (preg_match('/^s_av_pos_(\d+)_group_(.+)$/', $name, $m)) {
+                            $pos = (int)$m[1];
+                            $group = $m[2];
+
+                            namedAPI_set($doc_path.'/autoGrid/'.$name, [
+                                'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
+                                'group' => $group,
+                                'position' => $pos
+                            ]);
+                        }
+
+                        // s_av_presenter
+                        if ($name === 's_av_presenter') {
+                            namedAPI_set($doc_path.'/autoGrid/'.$name, [
+                                'video' => $doc_path . '/layers/av_presenter',
+                                'audio' => $doc_path . '/layers/a_presenter'
+                            ]);
+                        }
+
+                        // Only load variants for s_av_* control layers (autoGrid)
+                        if (preg_match('/^s_av_/', $name)) {
+                            $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
+                        }
                     }
                 }
 
@@ -1653,6 +1679,562 @@ script_functions:
 
     function decrement($base, $var, $val) {
         __increment_decrement($base, $var, $val, 'decrement');
+    }
+
+    function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0) {
+        $document_path = trim($document_path, '/');
+
+        // Start session if needed
+        if (!isset($_SESSION)) session_start();
+
+        // Load autoGrid structure from namedAPI
+        $autoGrid = namedAPI_get($document_path . '/autoGrid');
+        if ($autoGrid === null || empty($autoGrid)) {
+            debug_print($document_path, "setAutoGrid: No autoGrid structure found");
+            return ['delayed_off' => []];
+        }
+
+        // Get document resolution
+        $doc_width = namedAPI_get($document_path . '/metadata/width');
+        $doc_height = namedAPI_get($document_path . '/metadata/height');
+
+        // Define working area (window) within document
+        $work_left = $left;
+        $work_top = $top;
+        $work_width = $doc_width - $left - $right;
+        $work_height = $doc_height - $top - $bottom;
+
+        // Convert gap to pixels
+        $gap_px = 0;
+        if (is_string($gap) && str_ends_with($gap, '%')) {
+            $gap_px = (min($work_width, $work_height) * (float)rtrim($gap, '%')) / 100.0;
+        } else {
+            $gap_px = (float)$gap;
+        }
+
+        $delayed_off = [];
+
+        // ===== PHASE 1: Status ermitteln =====
+        foreach ($autoGrid as $s_layer_name => $layer_info) {
+            $s_layer_path = $document_path . '/layers/' . $s_layer_name;
+            $live_state = namedAPI_get($s_layer_path . '/live-state');
+
+            if ($live_state === 'off') {
+                // s_layer is OFF → status is 'exclude'
+                $autoGrid[$s_layer_name]['status'] = 'exclude';
+            } else {
+                // s_layer is LIVE → find which variant has live-state='live'
+                $variant_name = 'video-and-audio'; // default
+
+                // Check each known variant to find which has live-state='live'
+                $variant_names = ['video-and-audio', 'video-no-audio', 'audio-only', 'off', 'exclusive'];
+                foreach ($variant_names as $vname) {
+                    $variant_live_state = namedAPI_get($s_layer_path . '/variants/' . $vname . '/live-state');
+                    if ($variant_live_state === 'live') {
+                        $variant_name = $vname;
+                        break;
+                    }
+                }
+
+                $autoGrid[$s_layer_name]['status'] = $variant_name;
+            }
+        }
+
+        // ===== PHASE 2: Handle Exclusive Transitions =====
+        // Collect all exclusive layers
+        $exclusive_layers = [];
+        foreach ($autoGrid as $s_layer => $info) {
+            $status = $info['status'] ?? null;
+            if ($status === 'exclusive') {
+                $exclusive_layers[] = $s_layer;
+            }
+        }
+
+        // Only do transitions if we have MORE THAN ONE exclusive
+        if (count($exclusive_layers) > 1) {
+            // Get last exclusive from session to find out which one is new
+            $last_exclusive = $_SESSION[$document_path . '/lastExclusive'] ?? null;
+
+            // Find the new exclusive (the one that's NOT the last one)
+            $new_exclusive = null;
+            foreach ($exclusive_layers as $ex_layer) {
+                if ($ex_layer !== $last_exclusive) {
+                    $new_exclusive = $ex_layer;
+                    break;
+                }
+            }
+
+            if ($new_exclusive) {
+                // Transition old exclusive to video-and-audio
+                if ($last_exclusive) {
+                    setLive($document_path . '/layers/' . $last_exclusive . '/variants/video-and-audio');
+                }
+
+                // Transition all video-and-audio to audio-only
+                foreach ($autoGrid as $s_layer => $info) {
+                    if ($s_layer === $new_exclusive || $s_layer === $last_exclusive) continue;
+                    $status = $info['status'] ?? null;
+
+                    if ($status === 'video-and-audio') {
+                        setLive($document_path . '/layers/' . $s_layer . '/variants/audio-only');
+                    }
+                }
+
+                // Store new exclusive in session and return - NO calculations
+                $_SESSION[$document_path . '/lastExclusive'] = $new_exclusive;
+                return;
+            }
+        }
+
+        // ===== PHASE 3: Berechnungen =====
+
+        // Check if any exclusive status exists
+        $has_exclusive = false;
+        $exclusive_layer_info = null;
+        foreach ($autoGrid as $s_layer => $info) {
+            $status = $info['status'] ?? null;
+            if ($status === 'exclusive') {
+                $has_exclusive = true;
+                $exclusive_layer_info = $info;
+                $exclusive_layer_info['s_layer'] = $s_layer;
+                break;
+            }
+        }
+
+        if ($has_exclusive && $exclusive_layer_info) {
+            // EXCLUSIVE MODE: One layer fullscreen, all others shrink to center
+            $video_layer = $exclusive_layer_info['video'];
+
+            // Exclusive layer takes full working area (like single element in groups mode)
+            setLive($video_layer);
+            setValue($video_layer, [
+                'input-values' => [
+                    ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
+                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_highlight),
+                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                ],
+                'volume' => 1.0
+            ]);
+
+            // Shrink all other layers to center (size 0, border 0)
+            // Audio is NOT touched - leave it as is
+            $center_x = $work_left + ($work_width / 2);
+            $center_y = $work_top + ($work_height / 2);
+
+            foreach ($autoGrid as $s_layer => $info) {
+                $status = $info['status'] ?? null;
+                $video_layer = $info['video'] ?? null;
+
+                if (!$video_layer || $status === 'exclusive') continue;
+
+                setLive($video_layer);
+                setValue($video_layer, [
+                    'input-values' => [
+                        ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
+                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                    ]
+                    // DO NOT set volume - leave audio as is
+                ]);
+            }
+
+        } elseif (!$has_exclusive) {
+
+            // Case: exclusive (fills working area)
+            if ($status === 'exclusive') {
+                setLive($video_layer);
+                setValue($video_layer, [
+                    'input-values' => [
+                        ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
+                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                    ],
+                    'volume' => 1.0
+                ]);
+            }
+        }
+
+        // Grid layout for video-and-audio and video-no-audio positions
+        // Only if NO exclusive exists
+        $has_exclusive = false;
+        foreach ($autoGrid as $info) {
+            if (($info['status'] ?? null) === 'exclusive') {
+                $has_exclusive = true;
+                break;
+            }
+        }
+
+        if (!$has_exclusive) {
+            // Check if presenter is VISIBLE (not just exists)
+            $presenter_active = false;
+            if (isset($autoGrid['s_av_presenter'])) {
+                $presenter_status = $autoGrid['s_av_presenter']['status'] ?? null;
+                if ($presenter_status === 'video-and-audio' || $presenter_status === 'video-no-audio' || $presenter_status === 'exclusive') {
+                    $presenter_active = true;
+                }
+            }
+
+            if ($presenter_active) {
+                // PRESENTER MODE (within working area, aspect-ratio preserving)
+
+                // Check if there are any other visible positions
+                $has_other_visible = false;
+                foreach ($autoGrid as $s_layer => $info) {
+                    if ($s_layer === 's_av_presenter') continue;
+                    $status = $info['status'] ?? null;
+                    if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                        $has_other_visible = true;
+                        break;
+                    }
+                }
+
+                $doc_aspect = $doc_width / $doc_height;
+                $work_aspect = $work_width / $work_height;
+
+                // Calculate presenter size based on whether other positions are visible
+                $presenter_scale = $has_other_visible ? 0.7 : 1.0; // 70% if others visible, 100% if alone
+
+                if ($work_aspect > $doc_aspect) {
+                    // Work area is wider than document aspect - limit by height
+                    $presenter_height = $work_height * $presenter_scale;
+                    $presenter_width = $presenter_height * $doc_aspect;
+                } else {
+                    // Work area is taller than document aspect - limit by width
+                    $presenter_width = $work_width * $presenter_scale;
+                    $presenter_height = $presenter_width / $doc_aspect;
+                }
+
+                // Center presenter in working area
+                $presenter_left = $work_left + (($work_width - $presenter_width) / 2);
+                $presenter_top = $work_top + (($work_height - $presenter_height) / 2);
+
+                $presenter_video = $autoGrid['s_av_presenter']['video'];
+                $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
+                $presenter_status = $autoGrid['s_av_presenter']['status'];
+
+                // Calculate center point for presenter (for shrinking to size 0)
+                $presenter_center_x = $presenter_left + ($presenter_width / 2);
+                $presenter_center_y = $presenter_top + ($presenter_height / 2);
+
+                // Determine size based on status
+                if ($presenter_status === 'video-and-audio' || $presenter_status === 'video-no-audio' || $presenter_status === 'exclusive') {
+                    // Visible: normal size
+                    $final_width = $presenter_width;
+                    $final_height = $presenter_height;
+                    $final_left = $presenter_left;
+                    $final_top = $presenter_top;
+                    $border_width = 0.003703704;
+                } else {
+                    // Invisible (off, audio-only): size 0 at center
+                    $final_width = 0;
+                    $final_height = 0;
+                    $final_left = $presenter_center_x;
+                    $final_top = $presenter_center_y;
+                    $border_width = 0;
+                }
+
+                setLive($presenter_video);
+                setValue($presenter_video, [
+                    'input-values' => [
+                        ...mimoPosition('tvGroup_Geometry__Window', $final_width, $final_height, $final_top, $final_left, $document_path),
+                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width
+                    ],
+                    'volume' => ($presenter_status === 'video-and-audio' || $presenter_status === 'exclusive') ? 1.0 : 0.0
+                ]);
+
+                if ($presenter_audio) {
+                    setLive($presenter_audio);
+                    $audio_volume = ($presenter_status === 'video-and-audio' || $presenter_status === 'audio-only' || $presenter_status === 'exclusive') ? 1.0 : 0.0;
+                    setValue($presenter_audio, ['volume' => $audio_volume]);
+                }
+
+                // Collect all positions (except presenter) for zig-zag layout
+                $all_positions = [];
+                foreach ($autoGrid as $s_layer => $info) {
+                    if ($s_layer === 's_av_presenter') continue;
+                    $all_positions[] = $info;
+                }
+
+                if (count($all_positions) > 0) {
+                    // PHASE 1: Calculate all geometry first
+
+                    // Available space on each side (left and right of presenter within working area)
+                    $side_width = ($work_width - $presenter_width) / 2;
+
+                    // Tile dimensions - MUST BE SQUARE
+                    $tile_width = $side_width - (2 * $gap_px);
+                    $tile_height = $tile_width; // Square!
+
+                    // Separate visible positions by side for balanced centering
+                    $left_visible = [];
+                    $right_visible = [];
+
+                    foreach ($all_positions as $idx => $info) {
+                        $status = $info['status'] ?? null;
+                        $is_visible = ($status === 'video-and-audio' || $status === 'video-no-audio');
+
+                        if ($is_visible) {
+                            $side = ($idx % 2 === 0) ? 'right' : 'left';
+                            if ($side === 'right') {
+                                $right_visible[] = $idx;
+                            } else {
+                                $left_visible[] = $idx;
+                            }
+                        }
+                    }
+
+                    // Calculate x positions within working area
+                    $x_right = $work_left + $work_width - $gap_px - $tile_width;
+                    $x_left = $work_left + $gap_px;
+
+                    // Calculate vertical centering for each side independently
+                    $num_right = count($right_visible);
+                    $num_left = count($left_visible);
+
+                    // Right side centering
+                    $right_chain_height = ($num_right * $tile_height) + (($num_right - 1) * $gap_px);
+                    $y_start_right = $work_top + (($work_height - $right_chain_height) / 2);
+
+                    // Left side centering
+                    $left_chain_height = ($num_left * $tile_height) + (($num_left - 1) * $gap_px);
+                    $y_start_left = $work_top + (($work_height - $left_chain_height) / 2);
+
+                    // Build position calculations
+                    $position_calcs = [];
+                    $right_counter = 0;
+                    $left_counter = 0;
+
+                    foreach ($all_positions as $idx => $position) {
+                        $video_layer = $position['video'] ?? null;
+                        $status = $position['status'] ?? null;
+                        if (!$video_layer) continue;
+
+                        $side = ($idx % 2 === 0) ? 'right' : 'left';
+                        $is_visible = ($status === 'video-and-audio' || $status === 'video-no-audio');
+
+                        if ($side === 'right') {
+                            $x = $x_right;
+                            $y_pos = $y_start_right + ($right_counter * ($tile_height + $gap_px));
+                            if ($is_visible) $right_counter++;
+                        } else {
+                            $x = $x_left;
+                            $y_pos = $y_start_left + ($left_counter * ($tile_height + $gap_px));
+                            if ($is_visible) $left_counter++;
+                        }
+
+                        $width = $is_visible ? $tile_width : 0;
+                        $height = $is_visible ? $tile_height : 0;
+
+                        $position_calcs[] = [
+                            'video_layer' => $video_layer,
+                            'status' => $status,
+                            'x' => $x,
+                            'y' => $y_pos,
+                            'width' => $width,
+                            'height' => $height
+                        ];
+                    }
+
+                    // PHASE 2: Apply all calculated positions
+                    foreach ($position_calcs as $calc) {
+                        $video_layer = $calc['video_layer'];
+                        $status = $calc['status'];
+                        $x = $calc['x'];
+                        $y = $calc['y'];
+                        $width = $calc['width'];
+                        $height = $calc['height'];
+
+                        if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                            setLive($video_layer);
+                            setValue($video_layer, [
+                                'input-values' => [
+                                    ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
+                                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                                ],
+                                'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+                            ]);
+                        } else {
+                            $video_live_state = namedAPI_get($video_layer . '/live-state');
+
+                            if ($status === 'exclude') {
+                                if ($video_live_state === 'live') {
+                                    setValue($video_layer, [
+                                        'input-values' => [
+                                            ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
+                                            'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                            'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                        ],
+                                        'volume' => 0.0
+                                    ]);
+                                    $delayed_off[] = $video_layer;
+                                }
+                            } elseif ($status === 'off') {
+                                setLive($video_layer);
+                                setValue($video_layer, [
+                                    'input-values' => [
+                                        ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
+                                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                    ],
+                                    'volume' => 0.0
+                                ]);
+                            } elseif ($status === 'audio-only') {
+                                setLive($video_layer);
+                                setValue($video_layer, [
+                                    'input-values' => [
+                                        ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
+                                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                    ],
+                                    'volume' => 1.0
+                                ]);
+                            }
+                        }
+                    }
+                }
+
+            } else {
+                // GROUPS MODE
+
+                // Handle presenter if it exists but is not visible (off, audio-only)
+                if (isset($autoGrid['s_av_presenter'])) {
+                    $presenter_status = $autoGrid['s_av_presenter']['status'] ?? null;
+                    if ($presenter_status === 'off' || $presenter_status === 'audio-only') {
+                        $presenter_video = $autoGrid['s_av_presenter']['video'];
+                        $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
+
+                        // Shrink to center of working area
+                        $center_x = $work_left + ($work_width / 2);
+                        $center_y = $work_top + ($work_height / 2);
+
+                        setLive($presenter_video);
+                        setValue($presenter_video, [
+                            'input-values' => [
+                                ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
+                                'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                            ],
+                            'volume' => 0.0
+                        ]);
+
+                        if ($presenter_audio) {
+                            setLive($presenter_audio);
+                            $audio_volume = ($presenter_status === 'audio-only') ? 1.0 : 0.0;
+                            setValue($presenter_audio, ['volume' => $audio_volume]);
+                        }
+                    }
+                }
+
+                // Organize positions by group
+                $groups = [];
+                foreach ($autoGrid as $s_layer => $info) {
+                    if ($s_layer === 's_av_presenter') continue;
+
+                    $status = $info['status'] ?? null;
+                    $group = $info['group'] ?? null;
+
+                    if (!$group) continue;
+
+                    if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                        if (!isset($groups[$group])) {
+                            $groups[$group] = [];
+                        }
+                        $groups[$group][] = $info;
+                    }
+                }
+
+                $num_groups = count($groups);
+                if ($num_groups > 0) {
+                    $aspect_ratio = $work_width / $work_height;
+
+                    if ($aspect_ratio >= 1) {
+                        // 16:9 or wider: side-by-side within working area
+                        $group_width = ($work_width - ($num_groups - 1) * $gap_px) / $num_groups;
+                        $group_height = $work_height;
+
+                        $idx = 0;
+                        foreach ($groups as $group_name => $positions) {
+                            $group_left = $work_left + ($idx * ($group_width + $gap_px));
+                            $group_top = $work_top;
+
+                            layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default);
+                            $idx++;
+                        }
+                    } else {
+                        // 9:16 or taller: stacked within working area
+                        $group_width = $work_width;
+                        $group_height = ($work_height - ($num_groups - 1) * $gap_px) / $num_groups;
+
+                        $idx = 0;
+                        foreach ($groups as $group_name => $positions) {
+                            $group_left = $work_left;
+                            $group_top = $work_top + ($idx * ($group_height + $gap_px));
+
+                            layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default);
+                            $idx++;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ===== PHASE 4: Handle delayed OFF =====
+        // Execute setOff on next frame, but don't reload namedAPI between frames
+        if (!empty($delayed_off)) {
+            setSleep(0, false); // Execute frame 0, no reload
+            foreach ($delayed_off as $layer) {
+                setOff($layer);
+            }
+        }
+
+        // Store current exclusive in session at the end (only if one exists)
+        if (count($exclusive_layers) === 1) {
+            $_SESSION[$document_path . '/lastExclusive'] = $exclusive_layers[0];
+        } elseif (count($exclusive_layers) === 0) {
+            // No exclusive - clear the session
+            unset($_SESSION[$document_path . '/lastExclusive']);
+        }
+
+    }
+
+    function layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default) {
+        $num_visible = count($positions);
+        if ($num_visible === 0) return;
+
+        // Calculate grid dimensions based on group aspect ratio
+        $group_aspect = $group_width / $group_height;
+
+        // Start with square-root, then adjust for aspect ratio
+        $base_cols = sqrt($num_visible * $group_aspect);
+        $cols = max(1, round($base_cols));
+        $rows = ceil($num_visible / $cols);
+
+        $tile_width = ($group_width - ($cols - 1) * $gap_px) / $cols;
+        $tile_height = ($group_height - ($rows - 1) * $gap_px) / $rows;
+
+        // Position each tile
+        foreach ($positions as $idx => $position) {
+            $col = $idx % $cols;
+            $row = floor($idx / $cols);
+
+            $x = $group_left + $col * ($tile_width + $gap_px);
+            $y = $group_top + $row * ($tile_height + $gap_px);
+
+            $video_layer = $position['video'];
+            $status = $position['status'];
+
+            setLive($video_layer);
+            setValue($video_layer, [
+                'input-values' => [
+                    ...mimoPosition('tvGroup_Geometry__Window', $tile_width, $tile_height, $y, $x, $document_path),
+                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                ],
+                'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+            ]);
+        }
     }
 
     function getID($path) {
