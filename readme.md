@@ -561,6 +561,14 @@ These functions are available but are typically used internally:
   setAutoGrid($base, 0, '#FFFFFF', '#FF00FF', 0, 0, 0, 0);
   ```
 
+  **mimoLive Control Surface Compatibility:**
+
+  `setAutoGrid()` is fully compatible with mimoLive's Control Surfaces feature. You can create intuitive button layouts to switch between variants for each position:
+
+  ![mimoLive Control Surface Example](assets/mimoLive-control-surface.png)
+
+  The example document `autoGridTest.tvShow` demonstrates this setup with a complete Control Surface configuration.
+
 - **`wait($seconds)`** - Pause execution without processing frames (internal use)
   ```php
   wait(1.0); // Wait 1 second, no frame processing
