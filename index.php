@@ -1735,7 +1735,7 @@ script_functions:
                 $variant_name = 'video-and-audio'; // default
 
                 // Check each known variant to find which has live-state='live'
-                $variant_names = ['video-and-audio', 'video-no-audio', 'audio-only', 'off', 'exclusive'];
+                $variant_names = ['video-and-audio', 'video-no-audio', 'audio-only', 'off', 'exclusive', 'exclude'];
                 foreach ($variant_names as $vname) {
                     $variant_live_state = namedAPI_get($s_layer_path . '/variants/' . $vname . '/live-state');
                     if ($variant_live_state === 'live') {
@@ -2171,7 +2171,7 @@ script_functions:
                 // Handle presenter if it exists but is not visible (off, audio-only)
                 if (isset($autoGrid['s_av_presenter'])) {
                     $presenter_status = $autoGrid['s_av_presenter']['status'] ?? null;
-                    if ($presenter_status === 'off' || $presenter_status === 'audio-only') {
+                    if ($presenter_status === 'off' || $presenter_status === 'audio-only' || $presenter_status === 'exclude') {
                         $presenter_video = $autoGrid['s_av_presenter']['video'];
                         $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
 
