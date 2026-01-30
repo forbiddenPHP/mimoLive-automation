@@ -1912,35 +1912,11 @@ script_functions:
                     $presenter_left = $work_left;
                     $presenter_top = $work_top;
                 } else {
-                    // Calculate needed space for side tiles first
-                    // Count visible tiles per side to determine tile size
-                    $left_count = 0;
-                    $right_count = 0;
-                    foreach ($all_positions_temp as $idx => $info) {
-                        $status = $info['status'] ?? null;
-                        if ($status === 'video-and-audio' || $status === 'video-no-audio') {
-                            $side = ($idx % 2 === 0) ? 'right' : 'left';
-                            if ($side === 'right') $right_count++;
-                            else $left_count++;
-                        }
-                    }
-
-                    $max_tiles = max($left_count, $right_count);
-
-                    // Reserve space for side tiles: calculate their optimal size
-                    // Tiles are limited by height
-                    if ($max_tiles > 0) {
-                        $tile_size_by_height = ($work_height - (($max_tiles - 1) * $gap_px)) / $max_tiles;
-                        $needed_side_width = $tile_size_by_height + (2 * $gap_px);
-                    } else {
-                        $needed_side_width = 0;
-                    }
-
-                    // Presenter gets remaining width after reserving space for BOTH sides
-                    $presenter_max_width = $work_width - (2 * $needed_side_width);
+                    // Presenter gets 75% of working area width (maintaining aspect ratio)
+                    $presenter_max_width = $work_width * 0.75;
                     $presenter_max_height = $work_height;
 
-                    // Fit presenter within available space maintaining aspect ratio
+                    // Fit presenter within 75% width maintaining aspect ratio
                     $presenter_aspect = $doc_aspect;
                     if ($presenter_max_width / $presenter_max_height > $presenter_aspect) {
                         // Limited by height
