@@ -1891,32 +1891,42 @@ script_functions:
             if ($presenter_active) {
                 // PRESENTER MODE (within working area, aspect-ratio preserving)
 
-                // Check if there are any other visible positions and pre-calculate tile size
-                $has_other_visible = false;
+                // Check which sides have visible positions
+                $has_left_visible = false;
+                $has_right_visible = false;
                 $all_positions_temp = [];
                 foreach ($autoGrid as $s_layer => $info) {
                     if ($s_layer === 's_av_presenter') continue;
+                    $idx = count($all_positions_temp);
                     $all_positions_temp[] = $info;
                     $status = $info['status'] ?? null;
                     if ($status === 'video-and-audio' || $status === 'video-no-audio') {
-                        $has_other_visible = true;
+                        $side = ($idx % 2 === 0) ? 'right' : 'left';
+                        if ($side === 'right') $has_right_visible = true;
+                        else $has_left_visible = true;
                     }
                 }
 
                 $doc_aspect = $doc_width / $doc_height;
 
-                if (!$has_other_visible) {
-                    // No other visible positions - presenter takes full working area
+                // Max tile size for calculating reserved space
+                $max_tile_size = 200;
+                $tile_reserve = $max_tile_size + (2 * $gap_px);
+
+                if (!$has_left_visible && !$has_right_visible) {
+                    // No visible positions - presenter takes full working area
                     $presenter_width = $work_width;
                     $presenter_height = $work_height;
                     $presenter_left = $work_left;
                     $presenter_top = $work_top;
                 } else {
-                    // Presenter gets 75% of working area width (maintaining aspect ratio)
-                    $presenter_max_width = $work_width * 0.75;
+                    // Calculate reserved space for tiles (max 200px + gaps per occupied side)
+                    $left_reserve = $has_left_visible ? $tile_reserve : 0;
+                    $right_reserve = $has_right_visible ? $tile_reserve : 0;
+                    $presenter_max_width = $work_width - $left_reserve - $right_reserve;
                     $presenter_max_height = $work_height;
 
-                    // Fit presenter within 75% width maintaining aspect ratio
+                    // Fit presenter maintaining aspect ratio
                     $presenter_aspect = $doc_aspect;
                     if ($presenter_max_width / $presenter_max_height > $presenter_aspect) {
                         // Limited by height
@@ -1928,8 +1938,17 @@ script_functions:
                         $presenter_height = $presenter_width / $presenter_aspect;
                     }
 
-                    // Center presenter in working area
-                    $presenter_left = $work_left + (($work_width - $presenter_width) / 2);
+                    // Position presenter based on which sides have tiles
+                    if ($has_left_visible && !$has_right_visible) {
+                        // Only left has tiles - presenter shifts right
+                        $presenter_left = $work_left + $left_reserve + (($work_width - $left_reserve - $presenter_width) / 2);
+                    } elseif ($has_right_visible && !$has_left_visible) {
+                        // Only right has tiles - presenter shifts left
+                        $presenter_left = $work_left + (($work_width - $right_reserve - $presenter_width) / 2);
+                    } else {
+                        // Both sides have tiles - center presenter
+                        $presenter_left = $work_left + $left_reserve + (($presenter_max_width - $presenter_width) / 2);
+                    }
                     $presenter_top = $work_top + (($work_height - $presenter_height) / 2);
                 }
 
@@ -2007,8 +2026,15 @@ script_functions:
                     $max_tiles_per_side = max($num_right, $num_left);
 
                     // PHASE 2: Calculate tile dimensions
-                    // Available space on each side (left and right of presenter within working area)
-                    $side_width = ($work_width - $presenter_width) / 2;
+                    // Available space on each side depends on how many sides are occupied
+                    $num_occupied_sides = ($num_left > 0 ? 1 : 0) + ($num_right > 0 ? 1 : 0);
+                    if ($num_occupied_sides === 1) {
+                        // Only one side has tiles - it gets all the remaining space
+                        $side_width = $work_width - $presenter_width - $gap_px;
+                    } else {
+                        // Both sides have tiles - split remaining space
+                        $side_width = ($work_width - $presenter_width) / 2;
+                    }
 
                     // Tile dimensions - MUST BE SQUARE
                     // Limited by BOTH available width AND available height
@@ -2021,8 +2047,8 @@ script_functions:
                         $max_tile_from_height = $work_height;
                     }
 
-                    // Use the SMALLER dimension to ensure tiles fit
-                    $tile_size = min($max_tile_from_width, $max_tile_from_height);
+                    // Use the SMALLER dimension to ensure tiles fit, max 200px
+                    $tile_size = min($max_tile_from_width, $max_tile_from_height, 200);
                     $tile_width = $tile_size;
                     $tile_height = $tile_size;
 
