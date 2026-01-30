@@ -433,6 +433,134 @@ These functions simplify common tasks:
 
 These functions are available but are typically used internally:
 
+#### Auto Grid Layout
+
+- **`setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0)`** - Automatically arrange video placers in intelligent layouts for video conferences
+
+  **Overview:**
+  Creates balanced layouts for multiple video sources with automatic aspect-ratio preservation:
+  - **Presenter Mode**: Main presenter with smaller participants on sides
+  - **Groups Mode**: Multiple equal groups arranged side-by-side or stacked
+  - **Exclusive Mode**: One fullscreen, others hidden
+  - **Automatic Expansion**: Visible layers expand when others are hidden
+
+  **Basic Usage:**
+  ```php
+  $base = 'hosts/master/documents/MyShow';
+
+  // Simple grid with 2% gap, 30px margins
+  setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 30, 30, 30, 30);
+
+  // Fullscreen without borders/rounding (gap=0)
+  setAutoGrid($base, 0, '#FFFFFFFF', '#FF00FFFF', 0, 0, 0, 0);
+
+  // Space at bottom for lower third (300px)
+  setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 30, 30, 300, 30);
+
+  // Space at top for title/logo (300px)
+  setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 300, 30, 30, 30);
+  ```
+
+  **Layer Naming Convention:**
+
+  The system requires specific layer naming:
+
+  1. **Video Placer Layers:**
+     ```
+     av_pos_1_group_1    // Position 1, Group 1
+     av_pos_2_group_1    // Position 2, Group 1
+     av_pos_1_group_2    // Position 1, Group 2
+     av_presenter        // Presenter (optional)
+     ```
+
+  2. **Audio-Only Layers (optional):**
+     ```
+     a_pos_1_group_1     // Audio for position 1, group 1
+     a_presenter         // Audio for presenter
+     ```
+
+  3. **Control Script Layers (with variants):**
+     ```
+     s_av_pos_1_group_1  // Controls av_pos_1_group_1
+     s_av_pos_2_group_1  // Controls av_pos_2_group_1
+     s_av_presenter      // Controls av_presenter
+     ```
+
+  **Required Variants:**
+
+  Each control layer (`s_av_*`) MUST have these 5 variants:
+
+  | Variant | Meaning | Video | Audio |
+  |---------|---------|-------|-------|
+  | `video-and-audio` | Normally visible | ✓ Yes | ✓ Yes |
+  | `video-no-audio` | Video without sound | ✓ Yes | ✗ No |
+  | `audio-only` | Audio only, no video | ✗ No | ✓ Yes |
+  | `off` | Completely off | ✗ No | ✗ No |
+  | `exclusive` | Fullscreen trigger | ✓ Fullscreen | ✓ Yes |
+
+  Additional status: `exclude` when control layer itself is off (live-state)
+
+  **Modes:**
+
+  *Presenter Mode* (active when `s_av_presenter` exists AND is visible):
+  - Presenter centered (sized to fit available space, aspect-ratio preserved)
+  - Other positions alternating left/right (zig-zag)
+  - Position number determines vertical order (1=top, 2=below, etc.)
+  - Side tiles are square, sized based on available height
+  - If only presenter + 1 position visible: Position hidden, presenter takes full space
+
+  *Groups Mode* (active when NO presenter is visible):
+  - Groups arranged horizontally (16:9) or vertically (9:16)
+  - Each group gets equal space
+  - Within each group: Grid layout based on number of visible layers
+  - If only 1 group has visible layers: Takes full working area
+  - If only 1 layer in group: Takes full group size
+
+  *Exclusive Mode* (active when ONE control layer is on `exclusive` variant):
+  - Exclusive layer takes full working area (fullscreen)
+  - All other layers shrink to size 0 at center
+  - Exclusive layer gets `volume: 1.0`
+  - Other layers keep their audio (NOT muted)
+  - If 2+ exclusives simultaneously: Session-based transition logic triggers
+
+  **Expansion:**
+
+  When layers are hidden (status: `exclude`, `off`, `audio-only`):
+  - Visible layers expand to optimally use available space
+  - Hidden layers shrink to center of their original relative position
+
+  **Parameters:**
+  - `$document_path` (required): Document path (e.g., `'hosts/master/documents/MyShow'`)
+  - `$gap` (required): Space between placers - percentage (e.g., `'2%'`) or pixels (e.g., `20`)
+    - `gap = 0`: Fullscreen mode → No borders, no rounding
+    - `gap > 0`: Grid mode → Borders (double standard thickness), rounded corners
+  - `$color_default` (required): Border color for normal placers (hex, e.g., `'#FFFFFFFF'`)
+  - `$color_highlight` (required): Border color for exclusive placer (hex, e.g., `'#FF00FFFF'`)
+  - `$top` (optional): Top margin - pixels or percentage (e.g., `30` or `'10%'`), default `0`
+  - `$left` (optional): Left margin - pixels or percentage, default `0`
+  - `$bottom` (optional): Bottom margin - pixels or percentage, default `0`
+  - `$right` (optional): Right margin - pixels or percentage, default `0`
+
+  **Examples:**
+
+  Standard conference (Presenter + 6 participants):
+  ```php
+  // Setup: s_av_presenter + s_av_pos_1..6_group_1
+  setAutoGrid($base, '2%', '#FFFFFF', '#FF00FF', 30, 30, 30, 30);
+  ```
+
+  Two groups (Team A vs Team B):
+  ```php
+  // Setup: s_av_pos_1..4_group_1 + s_av_pos_1..4_group_2
+  setAutoGrid($base, '1.5%', '#FFFFFF', '#00FFFF', 50, 50, 50, 50);
+  ```
+
+  Seamless fullscreen:
+  ```php
+  // No gap = no borders, no rounding
+  setAutoGrid($base, 0, '#FFFFFF', '#FF00FF', 0, 0, 0, 0);
+  ```
+
 - **`wait($seconds)`** - Pause execution without processing frames (internal use)
   ```php
   wait(1.0); // Wait 1 second, no frame processing

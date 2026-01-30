@@ -1712,6 +1712,12 @@ script_functions:
             $gap_px = (float)$gap;
         }
 
+        // Determine corner radius and border width based on gap
+        // Gap = 0 means fullscreen/seamless mode → no corner radius, no border
+        // Gap > 0 means grid mode → corner radius and border
+        $corner_radius = ($gap_px == 0) ? 0 : 0.05555556;
+        $border_width_normal = ($gap_px == 0) ? 0.00 : 0.007407408;
+
         $delayed_off = [];
 
         // ===== PHASE 1: Status ermitteln =====
@@ -1811,7 +1817,9 @@ script_functions:
                 'input-values' => [
                     ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
                     'tvGroup_Appearance__Boarder_Color' => mimoColor($color_highlight),
-                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.00,
+                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                    'tvGroup_Appearance__Shape' => 2
                 ],
                 'volume' => 1.0
             ]);
@@ -1832,7 +1840,9 @@ script_functions:
                     'input-values' => [
                         ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                        'tvGroup_Appearance__Shape' => 2
                     ]
                     // DO NOT set volume - leave audio as is
                 ]);
@@ -1847,7 +1857,9 @@ script_functions:
                     'input-values' => [
                         ...mimoPosition('tvGroup_Geometry__Window', $work_width, $work_height, $work_top, $work_left, $document_path),
                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.00,
+                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                        'tvGroup_Appearance__Shape' => 2
                     ],
                     'volume' => 1.0
                 ]);
@@ -1877,36 +1889,71 @@ script_functions:
             if ($presenter_active) {
                 // PRESENTER MODE (within working area, aspect-ratio preserving)
 
-                // Check if there are any other visible positions
+                // Check if there are any other visible positions and pre-calculate tile size
                 $has_other_visible = false;
+                $all_positions_temp = [];
                 foreach ($autoGrid as $s_layer => $info) {
                     if ($s_layer === 's_av_presenter') continue;
+                    $all_positions_temp[] = $info;
                     $status = $info['status'] ?? null;
                     if ($status === 'video-and-audio' || $status === 'video-no-audio') {
                         $has_other_visible = true;
-                        break;
                     }
                 }
 
                 $doc_aspect = $doc_width / $doc_height;
-                $work_aspect = $work_width / $work_height;
 
-                // Calculate presenter size based on whether other positions are visible
-                $presenter_scale = $has_other_visible ? 0.7 : 1.0; // 70% if others visible, 100% if alone
-
-                if ($work_aspect > $doc_aspect) {
-                    // Work area is wider than document aspect - limit by height
-                    $presenter_height = $work_height * $presenter_scale;
-                    $presenter_width = $presenter_height * $doc_aspect;
+                if (!$has_other_visible) {
+                    // No other visible positions - presenter takes full working area
+                    $presenter_width = $work_width;
+                    $presenter_height = $work_height;
+                    $presenter_left = $work_left;
+                    $presenter_top = $work_top;
                 } else {
-                    // Work area is taller than document aspect - limit by width
-                    $presenter_width = $work_width * $presenter_scale;
-                    $presenter_height = $presenter_width / $doc_aspect;
-                }
+                    // Calculate needed space for side tiles first
+                    // Count visible tiles per side to determine tile size
+                    $left_count = 0;
+                    $right_count = 0;
+                    foreach ($all_positions_temp as $idx => $info) {
+                        $status = $info['status'] ?? null;
+                        if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                            $side = ($idx % 2 === 0) ? 'right' : 'left';
+                            if ($side === 'right') $right_count++;
+                            else $left_count++;
+                        }
+                    }
 
-                // Center presenter in working area
-                $presenter_left = $work_left + (($work_width - $presenter_width) / 2);
-                $presenter_top = $work_top + (($work_height - $presenter_height) / 2);
+                    $max_tiles = max($left_count, $right_count);
+
+                    // Reserve space for side tiles: calculate their optimal size
+                    // Tiles are limited by height
+                    if ($max_tiles > 0) {
+                        $tile_size_by_height = ($work_height - (($max_tiles - 1) * $gap_px)) / $max_tiles;
+                        $needed_side_width = $tile_size_by_height + (2 * $gap_px);
+                    } else {
+                        $needed_side_width = 0;
+                    }
+
+                    // Presenter gets remaining width after reserving space for BOTH sides
+                    $presenter_max_width = $work_width - (2 * $needed_side_width);
+                    $presenter_max_height = $work_height;
+
+                    // Fit presenter within available space maintaining aspect ratio
+                    $presenter_aspect = $doc_aspect;
+                    if ($presenter_max_width / $presenter_max_height > $presenter_aspect) {
+                        // Limited by height
+                        $presenter_height = $presenter_max_height;
+                        $presenter_width = $presenter_height * $presenter_aspect;
+                    } else {
+                        // Limited by width
+                        $presenter_width = $presenter_max_width;
+                        $presenter_height = $presenter_width / $presenter_aspect;
+                    }
+
+                    // Center presenter in working area
+                    $presenter_left = $work_left + (($work_width - $presenter_width) / 2);
+                    $presenter_top = $work_top + (($work_height - $presenter_height) / 2);
+                }
 
                 $presenter_video = $autoGrid['s_av_presenter']['video'];
                 $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
@@ -1923,7 +1970,7 @@ script_functions:
                     $final_height = $presenter_height;
                     $final_left = $presenter_left;
                     $final_top = $presenter_top;
-                    $border_width = 0.003703704;
+                    $border_width = $border_width_normal;
                 } else {
                     // Invisible (off, audio-only): size 0 at center
                     $final_width = 0;
@@ -1938,7 +1985,9 @@ script_functions:
                     'input-values' => [
                         ...mimoPosition('tvGroup_Geometry__Window', $final_width, $final_height, $final_top, $final_left, $document_path),
                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width
+                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width,
+                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                        'tvGroup_Appearance__Shape' => 2
                     ],
                     'volume' => ($presenter_status === 'video-and-audio' || $presenter_status === 'exclusive') ? 1.0 : 0.0
                 ]);
@@ -1957,16 +2006,7 @@ script_functions:
                 }
 
                 if (count($all_positions) > 0) {
-                    // PHASE 1: Calculate all geometry first
-
-                    // Available space on each side (left and right of presenter within working area)
-                    $side_width = ($work_width - $presenter_width) / 2;
-
-                    // Tile dimensions - MUST BE SQUARE
-                    $tile_width = $side_width - (2 * $gap_px);
-                    $tile_height = $tile_width; // Square!
-
-                    // Separate visible positions by side for balanced centering
+                    // PHASE 1: First count visible positions by side
                     $left_visible = [];
                     $right_visible = [];
 
@@ -1984,13 +2024,33 @@ script_functions:
                         }
                     }
 
+                    $num_right = count($right_visible);
+                    $num_left = count($left_visible);
+                    $max_tiles_per_side = max($num_right, $num_left);
+
+                    // PHASE 2: Calculate tile dimensions
+                    // Available space on each side (left and right of presenter within working area)
+                    $side_width = ($work_width - $presenter_width) / 2;
+
+                    // Tile dimensions - MUST BE SQUARE
+                    // Limited by BOTH available width AND available height
+                    $max_tile_from_width = $side_width - (2 * $gap_px);
+
+                    // Calculate max tile height based on how many tiles need to fit
+                    if ($max_tiles_per_side > 0) {
+                        $max_tile_from_height = ($work_height - (($max_tiles_per_side - 1) * $gap_px)) / $max_tiles_per_side;
+                    } else {
+                        $max_tile_from_height = $work_height;
+                    }
+
+                    // Use the SMALLER dimension to ensure tiles fit
+                    $tile_size = min($max_tile_from_width, $max_tile_from_height);
+                    $tile_width = $tile_size;
+                    $tile_height = $tile_size;
+
                     // Calculate x positions within working area
                     $x_right = $work_left + $work_width - $gap_px - $tile_width;
                     $x_left = $work_left + $gap_px;
-
-                    // Calculate vertical centering for each side independently
-                    $num_right = count($right_visible);
-                    $num_left = count($left_visible);
 
                     // Right side centering
                     $right_chain_height = ($num_right * $tile_height) + (($num_right - 1) * $gap_px);
@@ -2051,7 +2111,9 @@ script_functions:
                                 'input-values' => [
                                     ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
                                     'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
+                                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                                    'tvGroup_Appearance__Shape' => 2
                                 ],
                                 'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
                             ]);
@@ -2064,7 +2126,9 @@ script_functions:
                                         'input-values' => [
                                             ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
                                             'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                                            'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                            'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                                            'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                                            'tvGroup_Appearance__Shape' => 2
                                         ],
                                         'volume' => 0.0
                                     ]);
@@ -2076,7 +2140,9 @@ script_functions:
                                     'input-values' => [
                                         ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
                                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                                        'tvGroup_Appearance__Shape' => 2
                                     ],
                                     'volume' => 0.0
                                 ]);
@@ -2086,7 +2152,9 @@ script_functions:
                                     'input-values' => [
                                         ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
                                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                                        'tvGroup_Appearance__Shape' => 2
                                     ],
                                     'volume' => 1.0
                                 ]);
@@ -2114,7 +2182,9 @@ script_functions:
                             'input-values' => [
                                 ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
                                 'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                                'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0
+                                'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                                'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                                'tvGroup_Appearance__Shape' => 2
                             ],
                             'volume' => 0.0
                         ]);
@@ -2127,8 +2197,9 @@ script_functions:
                     }
                 }
 
-                // Organize positions by group
+                // Organize ALL positions by group (including non-visible ones)
                 $groups = [];
+                $groups_all = []; // All layers including non-visible
                 foreach ($autoGrid as $s_layer => $info) {
                     if ($s_layer === 's_av_presenter') continue;
 
@@ -2137,6 +2208,13 @@ script_functions:
 
                     if (!$group) continue;
 
+                    // Collect ALL layers for this group
+                    if (!isset($groups_all[$group])) {
+                        $groups_all[$group] = [];
+                    }
+                    $groups_all[$group][] = $info;
+
+                    // Collect only visible layers for grid calculation
                     if ($status === 'video-and-audio' || $status === 'video-no-audio') {
                         if (!isset($groups[$group])) {
                             $groups[$group] = [];
@@ -2145,6 +2223,7 @@ script_functions:
                     }
                 }
 
+                // Number of groups WITH visible layers
                 $num_groups = count($groups);
                 if ($num_groups > 0) {
                     $aspect_ratio = $work_width / $work_height;
@@ -2155,11 +2234,14 @@ script_functions:
                         $group_height = $work_height;
 
                         $idx = 0;
-                        foreach ($groups as $group_name => $positions) {
+                        foreach ($groups as $group_name => $visible_positions) {
                             $group_left = $work_left + ($idx * ($group_width + $gap_px));
                             $group_top = $work_top;
 
-                            layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default);
+                            // Get all positions for this group (including non-visible)
+                            $all_positions = $groups_all[$group_name] ?? [];
+
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius);
                             $idx++;
                         }
                     } else {
@@ -2168,13 +2250,43 @@ script_functions:
                         $group_height = ($work_height - ($num_groups - 1) * $gap_px) / $num_groups;
 
                         $idx = 0;
-                        foreach ($groups as $group_name => $positions) {
+                        foreach ($groups as $group_name => $visible_positions) {
                             $group_left = $work_left;
                             $group_top = $work_top + ($idx * ($group_height + $gap_px));
 
-                            layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default);
+                            // Get all positions for this group (including non-visible)
+                            $all_positions = $groups_all[$group_name] ?? [];
+
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius);
                             $idx++;
                         }
+                    }
+                }
+
+                // Handle groups WITHOUT any visible layers (shrink to center of working area)
+                $center_x = $work_left + ($work_width / 2);
+                $center_y = $work_top + ($work_height / 2);
+
+                foreach ($groups_all as $group_name => $all_positions) {
+                    // Skip groups that have visible layers (already handled above)
+                    if (isset($groups[$group_name])) continue;
+
+                    // This group has NO visible layers - shrink all to center
+                    foreach ($all_positions as $position) {
+                        $video_layer = $position['video'];
+                        $status = $position['status'];
+
+                        setLive($video_layer);
+                        setValue($video_layer, [
+                            'input-values' => [
+                                ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
+                                'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                                'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                                'tvGroup_Appearance__Shape' => 2
+                            ],
+                            'volume' => ($status === 'audio-only') ? 1.0 : 0.0
+                        ]);
                     }
                 }
             }
@@ -2199,28 +2311,91 @@ script_functions:
 
     }
 
-    function layoutGroupGrid($document_path, $positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default) {
-        $num_visible = count($positions);
-        if ($num_visible === 0) return;
+    function layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius) {
+        $num_visible = count($visible_positions);
+        $num_all = count($all_positions);
+        if ($num_all === 0) return;
 
-        // Calculate grid dimensions based on group aspect ratio
+        // Special case: Only ONE visible layer -> takes full group area
+        if ($num_visible === 1) {
+            $center_x = $group_left + ($group_width / 2);
+            $center_y = $group_top + ($group_height / 2);
+
+            foreach ($all_positions as $position) {
+                $video_layer = $position['video'];
+                $status = $position['status'];
+
+                if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                    // The ONE visible layer takes full group area
+                    setLive($video_layer);
+                    setValue($video_layer, [
+                        'input-values' => [
+                            ...mimoPosition('tvGroup_Geometry__Window', $group_width, $group_height, $group_top, $group_left, $document_path),
+                            'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                            'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
+                            'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                            'tvGroup_Appearance__Shape' => 2
+                        ],
+                        'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+                    ]);
+                } else {
+                    // Non-visible: shrink to center of group
+                    setLive($video_layer);
+                    setValue($video_layer, [
+                        'input-values' => [
+                            ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
+                            'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                            'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                            'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                            'tvGroup_Appearance__Shape' => 2
+                        ],
+                        'volume' => ($status === 'audio-only') ? 1.0 : 0.0
+                    ]);
+                }
+            }
+            return;
+        }
+
+        // Calculate grid dimensions based on VISIBLE positions (expansion)
         $group_aspect = $group_width / $group_height;
-
-        // Start with square-root, then adjust for aspect ratio
         $base_cols = sqrt($num_visible * $group_aspect);
         $cols = max(1, round($base_cols));
         $rows = ceil($num_visible / $cols);
 
-        $tile_width = ($group_width - ($cols - 1) * $gap_px) / $cols;
-        $tile_height = ($group_height - ($rows - 1) * $gap_px) / $rows;
+        $base_tile_width = ($group_width - ($cols - 1) * $gap_px) / $cols;
+        $base_tile_height = ($group_height - ($rows - 1) * $gap_px) / $rows;
 
-        // Position each tile
-        foreach ($positions as $idx => $position) {
-            $col = $idx % $cols;
-            $row = floor($idx / $cols);
+        // Position visible tiles (expanded to fill available space)
+        $visible_idx = 0;
+        foreach ($visible_positions as $position) {
+            $col = $visible_idx % $cols;
+            $row = floor($visible_idx / $cols);
 
-            $x = $group_left + $col * ($tile_width + $gap_px);
-            $y = $group_top + $row * ($tile_height + $gap_px);
+            // Check if this is the last row
+            $is_last_row = ($row === $rows - 1);
+            $items_in_last_row = $num_visible - ($rows - 1) * $cols;
+
+            // For last row: check if we need to expand width
+            if ($is_last_row && $items_in_last_row < $cols) {
+                // Last row has fewer items - expand them to fill width
+                $tile_width = ($group_width - ($items_in_last_row - 1) * $gap_px) / $items_in_last_row;
+                $x = $group_left + $col * ($tile_width + $gap_px);
+            } else {
+                $tile_width = $base_tile_width;
+                $x = $group_left + $col * ($tile_width + $gap_px);
+            }
+
+            // Check if this column is in last column and last row is incomplete
+            $is_last_col = ($col === $cols - 1);
+            if ($is_last_col && $is_last_row && $items_in_last_row < $cols) {
+                // Last item in incomplete row - expand height to fill remaining space
+                $remaining_height = $group_height - ($row * ($base_tile_height + $gap_px));
+                $tile_height = $remaining_height;
+            } else {
+                $tile_height = $base_tile_height;
+            }
+
+            $y = $group_top + $row * ($base_tile_height + $gap_px);
 
             $video_layer = $position['video'];
             $status = $position['status'];
@@ -2230,9 +2405,52 @@ script_functions:
                 'input-values' => [
                     ...mimoPosition('tvGroup_Geometry__Window', $tile_width, $tile_height, $y, $x, $document_path),
                     'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.003703704
+                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
+                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
+                    'tvGroup_Appearance__Shape' => 2
                 ],
                 'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+            ]);
+
+            $visible_idx++;
+        }
+
+        // Calculate original grid for non-visible layers (to preserve relative positions)
+        $orig_base_cols = sqrt($num_all * $group_aspect);
+        $orig_cols = max(1, round($orig_base_cols));
+        $orig_rows = ceil($num_all / $orig_cols);
+        $orig_tile_width = ($group_width - ($orig_cols - 1) * $gap_px) / $orig_cols;
+        $orig_tile_height = ($group_height - ($orig_rows - 1) * $gap_px) / $orig_rows;
+
+        // Shrink non-visible layers to center of their original relative position
+        foreach ($all_positions as $idx => $position) {
+            $status = $position['status'];
+
+            if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                continue; // Already handled above
+            }
+
+            $col = $idx % $orig_cols;
+            $row = floor($idx / $orig_cols);
+
+            $x = $group_left + $col * ($orig_tile_width + $gap_px);
+            $y = $group_top + $row * ($orig_tile_height + $gap_px);
+
+            $center_x = $x + ($orig_tile_width / 2);
+            $center_y = $y + ($orig_tile_height / 2);
+
+            $video_layer = $position['video'];
+
+            setLive($video_layer);
+            setValue($video_layer, [
+                'input-values' => [
+                    ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
+                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                    'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
+                    'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
+                    'tvGroup_Appearance__Shape' => 2
+                ],
+                'volume' => ($status === 'audio-only') ? 1.0 : 0.0
             ]);
         }
     }
