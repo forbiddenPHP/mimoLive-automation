@@ -12,13 +12,15 @@ init:
     $framerate=30; // default, will be overwritten by the ini-settings.
     $everything_is_fine=false;
     $background_mode=true; // set to true in production
-    if (isset($_GET['test']) && $_GET['test']==true) {$background_mode=false;}
+    $debug=false;
+    if (isset($_GET['test']) && $_GET['test']==true) {$background_mode=false; $debug=true;}
+    if (isset($_GET['realtime']) && $_GET['realtime']==true) {$background_mode=false; $debug=false;}
 
 
 functions:
     function debug_print($key, $message, $frame=null) {
-        global $background_mode, $OUTPUT, $current_frame;
-        if ($background_mode === false) {
+        global $debug, $OUTPUT, $current_frame;
+        if ($debug === true) {
             $key=trim($key);
             $key=trim($key, '/');
             $key=trim($key);

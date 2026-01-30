@@ -634,7 +634,33 @@ setOff($base.'layers/Lower3rd');
 
 ## Debug Helpers for your scripts
 
-Use firefox to call `?list`, `translate` or `?{any}&test=true`. It can render json.
+Use firefox to call `?list`, `translate`, `?{any}&test=true`, or `?{any}&realtime=true`. It can render json.
+
+### Execution Modes
+
+- **`?f=scriptname`** - Background execution (default)
+  - Script executes immediately and returns success message
+  - No waiting, no debug output
+  - Use for production automation calls from mimoLive
+
+- **`?f=scriptname&test=true`** - Test mode with debug output
+  - Waits for script completion
+  - Shows detailed debug information (API calls, calculations, etc.)
+  - Returns complete execution log as JSON
+  - Use for development and debugging
+
+- **`?f=scriptname&realtime=true`** - Realtime execution without debug output
+  - Waits for script completion
+  - No debug output (clean execution)
+  - Returns final result as JSON
+  - **Perfect for loops** (scripts < 10 seconds that run repeatedly)
+  - **Ideal for `setAutoGrid()`** - mimoLive can loop the call and get updated status in realtime
+
+  Example in mimoLive Automation Layer (While Live script):
+  ```php
+  httpRequest("http://localhost:8888/?f=update-grid&realtime=true");
+  ```
+  This allows mimoLive to continuously update the grid layout as participant states change.
 
 ### List API Keypaths
 
