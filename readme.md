@@ -222,6 +222,46 @@ These are the officially supported commands for controlling mimoLive:
 
   *Note: Comments are sent via GET request with URL parameters. Multiple comments queued in the same frame are sent separately (not merged). Requires the `/api/v1/comments/new` endpoint (since mimoLive 6.16b6 (30758)).*
 
+#### Data Stores
+
+mimoLive allows storing persistent data inside the document file. These functions operate **synchronously** (not queued) - they execute immediately and return results directly.
+
+- **`getDatastore($path, $keypath=null, $separator='/')`** - Read data from a datastore
+  ```php
+  // Get entire store
+  $data = getDatastore($base.'datastores/game-state');
+  // → ['scores' => ['frank' => 4, 'paul' => 1], 'round' => 3]
+
+  // Get specific value via keypath
+  $frank_score = getDatastore($base.'datastores/game-state', 'scores/frank');
+  // → 4
+
+  // Get nested structure
+  $scores = getDatastore($base.'datastores/game-state', 'scores');
+  // → ['frank' => 4, 'paul' => 1]
+  ```
+  *Returns `null` if store doesn't exist or keypath not found.*
+
+- **`setDatastore($path, $data, $replace=false)`** - Write data to a datastore
+  ```php
+  // Merge with existing data (default)
+  setDatastore($base.'datastores/game-state', [
+      'scores' => ['anna' => 7]  // adds anna, keeps frank and paul
+  ]);
+
+  // Replace entire store
+  setDatastore($base.'datastores/game-state', [
+      'scores' => ['anna' => 7]  // frank and paul are gone
+  ], replace: true);
+  ```
+  *By default, deep-merges with existing data. Use `replace: true` to overwrite completely.*
+
+- **`deleteDatastore($path)`** - Delete an entire datastore
+  ```php
+  deleteDatastore($base.'datastores/game-state');
+  ```
+  *Returns `true` on success, `false` if store didn't exist.*
+
 #### Property Updates
 
 - **`setValue($namedAPI_path, $updates_array)`** - Update properties of documents, layers, variants, sources, filters, or outputs
