@@ -190,6 +190,38 @@ These are the officially supported commands for controlling mimoLive:
   ```
   *Note: This function validates that the source is a Web Browser Capture source (`com.boinx.mimoLive.sources.webBrowserSource`) before sending the command.*
 
+#### Comments
+
+- **`pushComment($path, $comment_data)`** - Push a comment to mimoLive's comment system
+  ```php
+  // Full path
+  pushComment('hosts/master/comments/new', [
+      'username' => 'Anna Schmidt',
+      'comment' => 'Super Stream! 🎉',
+      'userimageurl' => 'https://i.pravatar.cc/150?img=1',
+      'platform' => 'youtube',
+      'favorite' => true
+  ]);
+
+  // Short path (without /comments/new)
+  pushComment('hosts/master', [
+      'username' => 'MaxGamer92',
+      'comment' => 'Grüße aus München!',
+      'platform' => 'twitch'
+  ]);
+  ```
+  *Parameters:*
+  - `$path` (required): Host path - either `'hosts/HOSTNAME/comments/new'` or `'hosts/HOSTNAME'`
+  - `$comment_data` (required): Array with comment data:
+    - `username` (required): Display name of the commenter
+    - `comment` (required): The comment text
+    - `userimageurl` (optional): URL to the user's avatar image
+    - `date` (optional): ISO8601 date string, defaults to current time
+    - `platform` (optional): `facebook`, `twitter`, `youtube`, or `twitch`
+    - `favorite` (optional): Boolean, mark as favorite
+
+  *Note: Comments are sent via GET request with URL parameters. Multiple comments queued in the same frame are sent separately (not merged). Requires the `/api/v1/comments/new` endpoint (since mimoLive 6.16b6 (30758)).*
+
 #### Property Updates
 
 - **`setValue($namedAPI_path, $updates_array)`** - Update properties of documents, layers, variants, sources, filters, or outputs
@@ -435,7 +467,7 @@ These functions are available but are typically used internally:
 
 #### Auto Grid Layout
 
-- **`setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0)`** - Automatically arrange video placers in intelligent layouts for video conferences
+- **`setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0)`** - Automatically arrange video placers in intelligent layouts for video conferences
 
   **Overview:**
   Creates balanced layouts for multiple video sources with automatic aspect-ratio preservation:
@@ -479,7 +511,14 @@ These functions are available but are typically used internally:
      a_presenter         // Audio for presenter
      ```
 
-  3. **Control Script Layers (with variants):**
+  3. **Audio Tracking Layers (optional):**
+     ```
+     at_pos_1_group_1    // Audio tracking for position 1, group 1
+     at_presenter        // Audio tracking for presenter
+     ```
+     These layers use the "Automation Audio-Level to API" layer type from mimoLive. They provide reliable real-time audio level data for speaker detection. The video source is automatically synced from the corresponding `av_*` layer.
+
+  4. **Control Script Layers (with variants):**
      ```
      s_av_pos_1_group_1  // Controls av_pos_1_group_1
      s_av_pos_2_group_1  // Controls av_pos_2_group_1
@@ -529,17 +568,27 @@ These functions are available but are typically used internally:
   - Visible layers expand to optimally use available space
   - Hidden layers shrink to center of their original relative position
 
+  **Speaker Detection (Audio Tracking):**
+
+  When audio tracking layers (`at_*`) are present, the system automatically highlights the active speaker:
+  - Border color switches from `$color_default` to `$color_highlight` when audio level exceeds `$threshold`
+  - Requires the "Automation Audio-Level to API" layer type from mimoLive
+  - Video source is automatically synced from `av_*` to `at_*` layers (only when changed)
+  - Audio level is read from `output-values/tvOut_VideoSourceAAudioLevel`
+  - Detection triggers when: `audio_level != 0 AND audio_level > $threshold`
+
   **Parameters:**
   - `$document_path` (required): Document path (e.g., `'hosts/master/documents/MyShow'`)
   - `$gap` (required): Space between placers - percentage (e.g., `'2%'`) or pixels (e.g., `20`)
     - `gap = 0`: Fullscreen mode → No borders, no rounding
     - `gap > 0`: Grid mode → Borders (double standard thickness), rounded corners
   - `$color_default` (required): Border color for normal placers (hex, e.g., `'#FFFFFFFF'`)
-  - `$color_highlight` (required): Border color for exclusive placer (hex, e.g., `'#FF00FFFF'`)
+  - `$color_highlight` (required): Border color for active speaker (hex, e.g., `'#FF00FFFF'`)
   - `$top` (optional): Top margin - pixels or percentage (e.g., `30` or `'10%'`), default `0`
   - `$left` (optional): Left margin - pixels or percentage, default `0`
   - `$bottom` (optional): Bottom margin - pixels or percentage, default `0`
   - `$right` (optional): Right margin - pixels or percentage, default `0`
+  - `$threshold` (optional): Audio level threshold for speaker detection in dB, default `-65.0`
 
   **Examples:**
 

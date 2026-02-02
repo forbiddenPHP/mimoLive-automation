@@ -4,6 +4,10 @@ $layer = $base . 'layers/MEv/variants/dyn';
 $sourceColor = $base . 'sources/Color';
 $sourceCam = $base . 'sources/c1-with-bluescreen';
 
+recall($base.'layer-sets/OFF');
+setLive($layer);
+setSleep(1);
+
 // Demo 1: Small box top left with crop using Color source
 setValue($layer, [
     'input-values' => [

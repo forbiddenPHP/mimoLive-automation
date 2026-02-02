@@ -226,6 +226,7 @@ functions:
                             namedAPI_set($doc_path.'/autoGrid/'.$name, [
                                 'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
                                 'audio' => $doc_path . '/layers/a_pos_' . $pos . '_group_' . $group,
+                                'tracking' => $doc_path . '/layers/at_pos_' . $pos . '_group_' . $group,
                                 'group' => $group,
                                 'position' => $pos
                             ]);
@@ -235,14 +236,13 @@ functions:
                         if ($name === 's_av_presenter') {
                             namedAPI_set($doc_path.'/autoGrid/'.$name, [
                                 'video' => $doc_path . '/layers/av_presenter',
-                                'audio' => $doc_path . '/layers/a_presenter'
+                                'audio' => $doc_path . '/layers/a_presenter',
+                                'tracking' => $doc_path . '/layers/at_presenter'
                             ]);
                         }
 
-                        // Only load variants for s_av_* control layers (autoGrid)
-                        if (preg_match('/^s_av_/', $name)) {
-                            $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
-                        }
+                        // Load variants for all layers
+                        $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
                     }
                 }
 
@@ -452,6 +452,12 @@ functions:
             return ['url' => $url, 'pwd' => $pwd_hash];
         }
 
+        // Handle comments: hosts/$host/comments/new
+        if ($parts[2] === 'comments' && count($parts) >= 4 && $parts[3] === 'new') {
+            $url = $base . '/comments/new';
+            return ['url' => $url, 'pwd' => $pwd_hash];
+        }
+
         if ($parts[2] === 'documents' && count($parts) >= 4) {
             $doc_name = $parts[3];
             $doc_id = namedAPI_get('hosts/'.$host_name.'/documents/'.$doc_name.'/id');
@@ -497,7 +503,7 @@ functions:
 
             if ($parts[4] === 'layer-sets') {
                 $layerset_name = $parts[5];
-                $layerset_id = namedAPI_get('hosts/'.$host_name.'/documents/'.$doc_name.'/layersets/'.$layerset_name.'/id');
+                $layerset_id = namedAPI_get('hosts/'.$host_name.'/documents/'.$doc_name.'/layer-sets/'.$layerset_name.'/id');
 
                 if ($layerset_id === null) {
                     return null;
@@ -547,19 +553,21 @@ functions:
         return null;
     }
 
-    function queue_action($frame, $namedAPI_path, $endpoint, $payload=null) {
+    function queue_action($frame, $namedAPI_path, $endpoint, $payload=null, $allow_merge=true) {
         global $queue;
 
         if (!isset($queue[$frame])) {
             $queue[$frame] = [];
         }
 
-        // Check if an action with same path+endpoint already exists
+        // Check if an action with same path+endpoint already exists (only if merging allowed)
         $found_index = null;
-        foreach ($queue[$frame] as $index => $existing_action) {
-            if ($existing_action['path'] === $namedAPI_path && $existing_action['endpoint'] === $endpoint) {
-                $found_index = $index;
-                break;
+        if ($allow_merge) {
+            foreach ($queue[$frame] as $index => $existing_action) {
+                if ($existing_action['path'] === $namedAPI_path && $existing_action['endpoint'] === $endpoint) {
+                    $found_index = $index;
+                    break;
+                }
             }
         }
 
@@ -622,6 +630,7 @@ functions:
                 $path_parts = explode('/', $action['path']);
                 $is_document_level = (count($path_parts) == 4 && $path_parts[2] === 'documents');
                 $needs_wrapper = (strpos($action['path'], '/output-destinations/') !== false);
+                $is_comment = (strpos($action['path'], '/comments/new') !== false);
 
                 debug_print('execution/setValue', "DEBUG setValue: path={$action['path']}, is_document_level=" . ($is_document_level ? 'YES' : 'NO') . ", needs_wrapper=" . ($needs_wrapper ? 'YES' : 'NO') . "\n");
 
@@ -644,7 +653,20 @@ functions:
                     }
                 }
 
-                if ($needs_wrapper) {
+                if ($is_comment) {
+                    // Comments use GET with URL parameters - RFC3986 uses rawurlencode
+                    $query_string = http_build_query($action['payload'], '', '&', PHP_QUERY_RFC3986);
+                    $full_url .= '?' . $query_string;
+
+                    debug_print($action['path'], " Using GET with URL parameters for comment\n");
+                    debug_print($action['path'], " URL = $full_url\n");
+
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $full_url);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+                    // GET request - no POST needed
+                } elseif ($needs_wrapper) {
                     // Output destinations need JSON:API format with PUT
                     $payload = [
                         'data' => [
@@ -869,10 +891,13 @@ read_script:
         'bouncethroughvariantsbackwards(' => 'bounceThroughVariantsBackwards(',
         'setlivefirstvariant(' => 'setLiveFirstVariant(',
         'setlivelastvariant(' => 'setLiveLastVariant(',
+        'increment(' => 'increment(',
+        'decrement(' => 'decrement(',
         'trigger(' => 'trigger(',
         'snapshot(' => 'snapshot(',
         'openwebbrowser(' => 'openWebBrowser(',
         'butonlyif(' => 'butOnlyIf(',
+        'setautogrid(' => 'setAutoGrid(',
         'setsleep(' => 'setSleep(',
         'setvalue(' => 'setValue(',
         'setvolume(' => 'setVolume(',
@@ -1335,6 +1360,51 @@ script_functions:
         queue_action($current_frame, $namedAPI_path, '', $updates_array);
     }
 
+    /**
+     * Push a comment to mimoLive's comment system
+     *
+     * @param string $path The host path: "hosts/master/comments/new" or "hosts/master"
+     * @param array $comment_data Comment data with keys:
+     *   - username (required): Display name of commenter
+     *   - comment (required): The comment text
+     *   - userimageurl (optional): URL to user's avatar image
+     *   - date (optional): ISO8601 date string, defaults to now
+     *   - platform (optional): facebook|twitter|youtube|twitch
+     *   - favorite (optional): boolean, mark as favorite
+     */
+    function pushComment($path, $comment_data) {
+        global $current_frame;
+
+        // Validate required fields
+        if (empty($comment_data['username']) || empty($comment_data['comment'])) {
+            debug_print('comments', "pushComment() ERROR: username and comment are required\n");
+            return;
+        }
+
+        // Normalize path
+        $path = trim($path, '/');
+
+        // Accept "hosts/XXX/comments/new" or "hosts/XXX" - normalize to full path
+        if (preg_match('#^hosts/([^/]+)$#', $path, $matches)) {
+            $path = $path . '/comments/new';
+        } elseif (!preg_match('#^hosts/[^/]+/comments/new$#', $path)) {
+            debug_print('comments', "pushComment() ERROR: Invalid path '$path'. Use 'hosts/HOSTNAME' or 'hosts/HOSTNAME/comments/new'\n");
+            return;
+        }
+
+        // Build payload - add default date if not provided
+        $payload = $comment_data;
+        if (empty($payload['date'])) {
+            $payload['date'] = date('c');
+        }
+        if (isset($payload['favorite'])) {
+            $payload['favorite'] = $payload['favorite'] ? 'true' : 'false';
+        }
+
+        debug_print('comments', "pushComment() called: path=$path\n");
+        queue_action($current_frame, $path, '', $payload, false);  // false = don't merge, each comment is separate
+    }
+
     function setVolume($namedAPI_path, $value) {
         $namedAPI_path=trim($namedAPI_path, '/');
         $namedAPI_path=trim($namedAPI_path);
@@ -1693,7 +1763,23 @@ script_functions:
         __increment_decrement($base, $var, $val, 'decrement');
     }
 
-    function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0) {
+    function getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold = -65.0) {
+        if ($tracking_layer === null) {
+            return $color_default;
+        }
+        // Check if tracking layer exists
+        $tracking_id = namedAPI_get($tracking_layer . '/id');
+        if ($tracking_id === null) {
+            return $color_default;
+        }
+        $audio_level = namedAPI_get($tracking_layer . '/output-values/tvOut_VideoSourceAAudioLevel');
+        if ($audio_level !== null && (float)$audio_level != 0 && (float)$audio_level > $threshold) {
+            return $color_highlight;
+        }
+        return $color_default;
+    }
+
+    function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0) {
         $document_path = trim($document_path, '/');
 
         // Start session if needed
@@ -1704,6 +1790,31 @@ script_functions:
         if ($autoGrid === null || empty($autoGrid)) {
             debug_print($document_path, "setAutoGrid: No autoGrid structure found");
             return ['delayed_off' => []];
+        }
+
+        // Sync video source from av_* to at_* (tracking layers)
+        foreach ($autoGrid as $s_layer_name => $layer_info) {
+            $video_layer = $layer_info['video'] ?? null;
+            $tracking_layer = $layer_info['tracking'] ?? null;
+
+            if ($video_layer && $tracking_layer) {
+                // Check if tracking layer exists
+                $tracking_id = namedAPI_get($tracking_layer . '/id');
+                if ($tracking_id !== null) {
+                    // Get source from both layers
+                    $video_source = namedAPI_get($video_layer . '/input-values/tvIn_VideoSourceAImage');
+                    $tracking_source = namedAPI_get($tracking_layer . '/input-values/tvIn_VideoSourceAImage');
+                    // Only sync if sources differ
+                    if ($video_source !== null && $video_source !== $tracking_source) {
+                        setLive($tracking_layer);
+                        setValue($tracking_layer, [
+                            'input-values' => [
+                                'tvIn_VideoSourceAImage' => $video_source
+                            ]
+                        ]);
+                    }
+                }
+            }
         }
 
         // Get document resolution
@@ -1964,6 +2075,7 @@ script_functions:
 
                 $presenter_video = $autoGrid['s_av_presenter']['video'];
                 $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
+                $presenter_tracking = $autoGrid['s_av_presenter']['tracking'] ?? null;
                 $presenter_status = $autoGrid['s_av_presenter']['status'];
 
                 // Calculate center point for presenter (for shrinking to size 0)
@@ -1987,11 +2099,12 @@ script_functions:
                     $border_width = 0;
                 }
 
+                $presenter_border_color = ($border_width > 0) ? getAudioHighlightColor($presenter_tracking, $color_default, $color_highlight, $threshold) : $color_default;
                 setLive($presenter_video);
                 setValue($presenter_video, [
                     'input-values' => [
                         ...mimoPosition('tvGroup_Geometry__Window', $final_width, $final_height, $final_top, $final_left, $document_path),
-                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                        'tvGroup_Appearance__Boarder_Color' => mimoColor($presenter_border_color),
                         'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width,
                         'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                         'tvGroup_Appearance__Shape' => 2
@@ -2082,6 +2195,7 @@ script_functions:
                     foreach ($all_positions as $idx => $position) {
                         $video_layer = $position['video'] ?? null;
                         $audio_layer = $position['audio'] ?? null;
+                        $tracking_layer = $position['tracking'] ?? null;
                         $status = $position['status'] ?? null;
                         if (!$video_layer) continue;
 
@@ -2104,6 +2218,7 @@ script_functions:
                         $position_calcs[] = [
                             'video_layer' => $video_layer,
                             'audio_layer' => $audio_layer,
+                            'tracking_layer' => $tracking_layer,
                             'status' => $status,
                             'x' => $x,
                             'y' => $y_pos,
@@ -2116,6 +2231,7 @@ script_functions:
                     foreach ($position_calcs as $calc) {
                         $video_layer = $calc['video_layer'];
                         $audio_layer = $calc['audio_layer'] ?? null;
+                        $tracking_layer = $calc['tracking_layer'] ?? null;
                         $status = $calc['status'];
                         $x = $calc['x'];
                         $y = $calc['y'];
@@ -2123,11 +2239,12 @@ script_functions:
                         $height = $calc['height'];
 
                         if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                            $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
                             setLive($video_layer);
                             setValue($video_layer, [
                                 'input-values' => [
                                     ...mimoPosition('tvGroup_Geometry__Window', $width, $height, $y, $x, $document_path),
-                                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                                    'tvGroup_Appearance__Boarder_Color' => mimoColor($border_color),
                                     'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
                                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                                     'tvGroup_Appearance__Shape' => 2
@@ -2282,7 +2399,7 @@ script_functions:
                             // Get all positions for this group (including non-visible)
                             $all_positions = $groups_all[$group_name] ?? [];
 
-                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius);
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold);
                             $idx++;
                         }
                     } else {
@@ -2298,7 +2415,7 @@ script_functions:
                             // Get all positions for this group (including non-visible)
                             $all_positions = $groups_all[$group_name] ?? [];
 
-                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius);
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold);
                             $idx++;
                         }
                     }
@@ -2352,7 +2469,7 @@ script_functions:
 
     }
 
-    function layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $border_width_normal, $corner_radius) {
+    function layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold) {
         $num_visible = count($visible_positions);
         $num_all = count($all_positions);
         if ($num_all === 0) return;
@@ -2365,15 +2482,17 @@ script_functions:
             foreach ($all_positions as $position) {
                 $video_layer = $position['video'];
                 $audio_layer = $position['audio'] ?? null;
+                $tracking_layer = $position['tracking'] ?? null;
                 $status = $position['status'];
 
                 if ($status === 'video-and-audio' || $status === 'video-no-audio') {
                     // The ONE visible layer takes full group area
+                    $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
                     setLive($video_layer);
                     setValue($video_layer, [
                         'input-values' => [
                             ...mimoPosition('tvGroup_Geometry__Window', $group_width, $group_height, $group_top, $group_left, $document_path),
-                            'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                            'tvGroup_Appearance__Boarder_Color' => mimoColor($border_color),
                             'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
                             'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                             'tvGroup_Appearance__Shape' => 2
@@ -2453,13 +2572,15 @@ script_functions:
 
             $video_layer = $position['video'];
             $audio_layer = $position['audio'] ?? null;
+            $tracking_layer = $position['tracking'] ?? null;
             $status = $position['status'];
 
+            $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
             setLive($video_layer);
             setValue($video_layer, [
                 'input-values' => [
                     ...mimoPosition('tvGroup_Geometry__Window', $tile_width, $tile_height, $y, $x, $document_path),
-                    'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
+                    'tvGroup_Appearance__Boarder_Color' => mimoColor($border_color),
                     'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => $border_width_normal,
                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                     'tvGroup_Appearance__Shape' => 2
