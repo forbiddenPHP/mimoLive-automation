@@ -3,12 +3,13 @@
 init:
     set_time_limit(0);
     ignore_user_abort(true);
-    global $namedAPI, $configuration, $OUTPUT, $queue, $current_frame;
+    global $namedAPI, $configuration, $OUTPUT, $queue, $current_frame, $load;
     $namedAPI=[];
     $configuration=[];
     $OUTPUT=[];
     $queue=[];
     $current_frame=0;
+    $load=[];
     $everything_is_fine=false;
     $background_mode=true; // set to true in production
     $debug=false;
@@ -42,7 +43,22 @@ functions:
     }
 
     function build_namedAPI() {
-            global $configuration, $namedAPI;
+            global $configuration, $namedAPI, $load;
+
+    // Fallback: load everything if $load is empty (should not happen)
+    if (empty($load)) {
+        $load = [
+            'devices' => true,
+            'sources' => true,
+            'filters' => true,
+            'layer-sets' => true,
+            'layers' => true,
+            'variants' => true,
+            'output-destinations' => true,
+            'autoGrid' => true,
+            'zoom' => true,
+        ];
+    }
     
     $hosts = array_get($configuration, 'hosts', default: []);
 
@@ -70,20 +86,39 @@ functions:
         curl_multi_add_handle($mh, $ch);
         $curl_handles[] = ['ch' => $ch, 'host' => $host_name, 'type' => 'documents'];
 
-        // Devices
-        $url_devices = $protocol . $host . ':' . $port . '/api/v1/devices';
+        // Devices (only if needed)
+        if ($load['devices']) {
+            $url_devices = $protocol . $host . ':' . $port . '/api/v1/devices';
 
-        $ch_devices = curl_init();
-        curl_setopt($ch_devices, CURLOPT_URL, $url_devices);
-        curl_setopt($ch_devices, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch_devices, CURLOPT_TIMEOUT, 5);
+            $ch_devices = curl_init();
+            curl_setopt($ch_devices, CURLOPT_URL, $url_devices);
+            curl_setopt($ch_devices, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch_devices, CURLOPT_TIMEOUT, 5);
 
-        if (strlen($pwd_hash) > 0) {
-            curl_setopt($ch_devices, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
+            if (strlen($pwd_hash) > 0) {
+                curl_setopt($ch_devices, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
+            }
+
+            curl_multi_add_handle($mh, $ch_devices);
+            $curl_handles[] = ['ch' => $ch_devices, 'host' => $host_name, 'type' => 'devices'];
         }
 
-        curl_multi_add_handle($mh, $ch_devices);
-        $curl_handles[] = ['ch' => $ch_devices, 'host' => $host_name, 'type' => 'devices'];
+        // Zoom participants (only if needed)
+        if ($load['zoom'] ?? false) {
+            $url_zoom = $protocol . $host . ':' . $port . '/api/v1/zoom/participants';
+
+            $ch_zoom = curl_init();
+            curl_setopt($ch_zoom, CURLOPT_URL, $url_zoom);
+            curl_setopt($ch_zoom, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch_zoom, CURLOPT_TIMEOUT, 5);
+
+            if (strlen($pwd_hash) > 0) {
+                curl_setopt($ch_zoom, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
+            }
+
+            curl_multi_add_handle($mh, $ch_zoom);
+            $curl_handles[] = ['ch' => $ch_zoom, 'host' => $host_name, 'type' => 'zoom'];
+        }
     }
     
     $running = null;
@@ -104,6 +139,26 @@ functions:
 
         if ($http_code === 200 && $response !== false) {
             $data = json_decode($response, true);
+
+            // Zoom participants: organize by name like other entities
+            if ($type === 'zoom' && $data !== null) {
+                // Always store count (parallel to participants)
+                namedAPI_set('hosts/'.$host_name.'/zoom/participants-count', count($data['data']));
+
+                // Store each participant by name
+                foreach ($data['data'] as $participant) {
+                    $name = $participant['name'];
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/id', $participant['id']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isHost', $participant['isHost']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isCoHost', $participant['isCoHost']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isVideoOn', $participant['isVideoOn']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isAudioOn', $participant['isAudioOn']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isTalking', $participant['isTalking']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/isRaisingHand', $participant['isRaisingHand']);
+                    namedAPI_set('hosts/'.$host_name.'/zoom/participants/'.$name.'/userRole', $participant['userRole']);
+                }
+            }
+
             if ($data !== null && isset($data['data'])) {
 
                 if ($type === 'documents') {
@@ -122,10 +177,18 @@ functions:
                         $base = $protocol . $host . ':' . $port . '/api/v1/documents/' . $doc_id;
                         $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
 
-                        $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
-                        $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
-                        $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
-                        $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
+                        if ($load['sources'] || $load['filters']) {
+                            $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
+                        }
+                        if ($load['layers'] || $load['variants'] || $load['autoGrid']) {
+                            $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
+                        }
+                        if ($load['layer-sets']) {
+                            $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
+                        }
+                        if ($load['output-destinations']) {
+                            $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
+                        }
                     }
                 }
 
@@ -140,6 +203,7 @@ functions:
                         }
                     }
                 }
+
             }
         }
 
@@ -201,7 +265,9 @@ functions:
                         // Zusätzlich: Asset-Referenz
                         namedAPI_set('hosts/'.$meta['host'].'/assets/'.$name, $id);
 
-                        $phase3_queue[] = ['url' => $base.'/sources/'.$id.'/filters', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'source_name' => $name, 'type' => 'filters', 'pwd' => $meta['pwd']];
+                        if ($load['filters']) {
+                            $phase3_queue[] = ['url' => $base.'/sources/'.$id.'/filters', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'source_name' => $name, 'type' => 'filters', 'pwd' => $meta['pwd']];
+                        }
                     }
                 }
 
@@ -219,37 +285,41 @@ functions:
                             namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/relationships', $item['relationships']);
                         }
 
-                        // AutoGrid: Build structure for s_av_* layers
-                        $doc_path = 'hosts/'.$meta['host'].'/documents/'.$meta['doc_name'];
-                        $live_state = $item['attributes']['live-state'] ?? 'off';
+                        // AutoGrid: Build structure for s_av_* layers (only if autoGrid is needed)
+                        if ($load['autoGrid']) {
+                            $doc_path = 'hosts/'.$meta['host'].'/documents/'.$meta['doc_name'];
+                            $live_state = $item['attributes']['live-state'] ?? 'off';
 
-                        // s_av_pos_N_group_X
-                        if (preg_match('/^s_av_pos_(\d+)_group_(.+)$/', $name, $m)) {
-                            $pos = (int)$m[1];
-                            $group = $m[2];
+                            // s_av_pos_N_group_X
+                            if (preg_match('/^s_av_pos_(\d+)_group_(.+)$/', $name, $m)) {
+                                $pos = (int)$m[1];
+                                $group = $m[2];
 
-                            namedAPI_set($doc_path.'/autoGrid/'.$name, [
-                                'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
-                                'audio' => $doc_path . '/layers/a_pos_' . $pos . '_group_' . $group,
-                                'group' => (int)$group,
-                                'position' => $pos,
-                                'is_presenter' => false,
-                                'live_state' => $live_state
-                            ]);
+                                namedAPI_set($doc_path.'/autoGrid/'.$name, [
+                                    'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
+                                    'audio' => $doc_path . '/layers/a_pos_' . $pos . '_group_' . $group,
+                                    'group' => (int)$group,
+                                    'position' => $pos,
+                                    'is_presenter' => false,
+                                    'live_state' => $live_state
+                                ]);
+                            }
+
+                            // s_av_presenter
+                            if ($name === 's_av_presenter') {
+                                namedAPI_set($doc_path.'/autoGrid/'.$name, [
+                                    'video' => $doc_path . '/layers/av_presenter',
+                                    'audio' => $doc_path . '/layers/a_presenter',
+                                    'is_presenter' => true,
+                                    'live_state' => $live_state
+                                ]);
+                            }
                         }
 
-                        // s_av_presenter
-                        if ($name === 's_av_presenter') {
-                            namedAPI_set($doc_path.'/autoGrid/'.$name, [
-                                'video' => $doc_path . '/layers/av_presenter',
-                                'audio' => $doc_path . '/layers/a_presenter',
-                                'is_presenter' => true,
-                                'live_state' => $live_state
-                            ]);
+                        // Load variants for all layers (only if needed)
+                        if ($load['variants'] || $load['autoGrid']) {
+                            $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
                         }
-
-                        // Load variants for all layers
-                        $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
                     }
                 }
 
@@ -344,16 +414,18 @@ functions:
                         }
                     }
 
-                    // If this is an s_av_* layer, update autoGrid with status
-                    $autoGrid_entry = namedAPI_get($doc_path.'/autoGrid/'.$layer_name);
-                    if ($autoGrid_entry !== null) {
-                        $live_state = $autoGrid_entry['live_state'] ?? 'off';
-                        if ($live_state === 'off') {
-                            $status = 'exclude';
-                        } else {
-                            $status = $active_variant ?? 'video-and-audio';
+                    // If this is an s_av_* layer, update autoGrid with status (only if autoGrid is needed)
+                    if ($load['autoGrid']) {
+                        $autoGrid_entry = namedAPI_get($doc_path.'/autoGrid/'.$layer_name);
+                        if ($autoGrid_entry !== null) {
+                            $live_state = $autoGrid_entry['live_state'] ?? 'off';
+                            if ($live_state === 'off') {
+                                $status = 'exclude';
+                            } else {
+                                $status = $active_variant ?? 'video-and-audio';
+                            }
+                            namedAPI_set($doc_path.'/autoGrid/'.$layer_name.'/status', $status);
                         }
-                        namedAPI_set($doc_path.'/autoGrid/'.$layer_name.'/status', $status);
                     }
                 }
             }
@@ -369,63 +441,65 @@ functions:
         namedAPI_set('hosts/'.$host_name.'/assets/none', '2124830483-com.mimolive.source.nonesource');
     }
 
-    // ===== Phase 4: Enrich autoGrid data =====
-    // Now that all data is loaded, enrich autoGrid entries with precomputed values
-    foreach ($hosts as $host_name => $host) {
-        $docs = namedAPI_get('hosts/'.$host_name.'/documents');
-        if (!is_array($docs)) continue;
+    // ===== Phase 4: Enrich autoGrid data (only if autoGrid is needed) =====
+    if ($load['autoGrid']) {
+        // Now that all data is loaded, enrich autoGrid entries with precomputed values
+        foreach ($hosts as $host_name => $host) {
+            $docs = namedAPI_get('hosts/'.$host_name.'/documents');
+            if (!is_array($docs)) continue;
 
-        foreach ($docs as $doc_name => $doc_data) {
-            $doc_path = 'hosts/'.$host_name.'/documents/'.$doc_name;
-            $autoGrid = namedAPI_get($doc_path.'/autoGrid');
-            if (!is_array($autoGrid)) continue;
+            foreach ($docs as $doc_name => $doc_data) {
+                $doc_path = 'hosts/'.$host_name.'/documents/'.$doc_name;
+                $autoGrid = namedAPI_get($doc_path.'/autoGrid');
+                if (!is_array($autoGrid)) continue;
 
-            // Collect metadata
-            $doc_width = namedAPI_get($doc_path.'/metadata/width');
-            $doc_height = namedAPI_get($doc_path.'/metadata/height');
-            $has_presenter = isset($autoGrid['s_av_presenter']);
-            $groups = [];
+                // Collect metadata
+                $doc_width = namedAPI_get($doc_path.'/metadata/width');
+                $doc_height = namedAPI_get($doc_path.'/metadata/height');
+                $has_presenter = isset($autoGrid['s_av_presenter']);
+                $groups = [];
 
-            foreach ($autoGrid as $s_layer_name => $entry) {
-                if (!is_array($entry)) continue;
+                foreach ($autoGrid as $s_layer_name => $entry) {
+                    if (!is_array($entry)) continue;
 
-                $video_layer = $entry['video'] ?? null;
-                $audio_layer = $entry['audio'] ?? null;
+                    $video_layer = $entry['video'] ?? null;
+                    $audio_layer = $entry['audio'] ?? null;
 
-                // Check if audio layer exists
-                $audio_exists = ($audio_layer !== null && namedAPI_get($audio_layer.'/id') !== null);
-                namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_exists', $audio_exists);
+                    // Check if audio layer exists
+                    $audio_exists = ($audio_layer !== null && namedAPI_get($audio_layer.'/id') !== null);
+                    namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_exists', $audio_exists);
 
-                // Get video source from av_* layer
-                $video_source = namedAPI_get($video_layer.'/input-values/tvIn_VideoSourceAImage');
-                namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/video_source', $video_source);
+                    // Get video source from av_* layer
+                    $video_source = namedAPI_get($video_layer.'/input-values/tvIn_VideoSourceAImage');
+                    namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/video_source', $video_source);
 
-                // Get audio source and level from a_* layer (if exists)
-                if ($audio_exists) {
-                    $audio_source = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudio');
-                    $level0 = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel0') ?? 0;
-                    $level1 = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel1') ?? 0;
-                    $audio_level = ($level0 + $level1) / 2;
+                    // Get audio source and level from a_* layer (if exists)
+                    if ($audio_exists) {
+                        $audio_source = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudio');
+                        $level0 = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel0') ?? 0;
+                        $level1 = namedAPI_get($audio_layer.'/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel1') ?? 0;
+                        $audio_level = ($level0 + $level1) / 2;
 
-                    namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_source', $audio_source);
-                    namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_level', $audio_level);
+                        namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_source', $audio_source);
+                        namedAPI_set($doc_path.'/autoGrid/'.$s_layer_name.'/audio_level', $audio_level);
+                    }
+
+                    // Collect groups
+                    $group = $entry['group'] ?? null;
+                    if ($group !== null && !in_array($group, $groups)) {
+                        $groups[] = $group;
+                    }
                 }
 
-                // Collect groups
-                $group = $entry['group'] ?? null;
-                if ($group !== null && !in_array($group, $groups)) {
-                    $groups[] = $group;
-                }
+                // Store _meta
+                sort($groups);
+                namedAPI_set($doc_path.'/autoGrid/_meta', [
+                    'doc_width' => $doc_width,
+                    'doc_height' => $doc_height,
+                    'has_presenter' => $has_presenter,
+                    'groups' => $groups
+                ]);
             }
-
-            // Store _meta
-            sort($groups);
-            namedAPI_set($doc_path.'/autoGrid/_meta', [
-                'doc_width' => $doc_width,
-                'doc_height' => $doc_height,
-                'has_presenter' => $has_presenter,
-                'groups' => $groups
-            ]);
         }
     }
 
@@ -849,6 +923,48 @@ config_ini:
         }
     }
 
+determine_load_sections:
+    // Initialize $load array - determines which sections to load in namedAPI
+    $load = [
+        'devices' => false,
+        'sources' => false,
+        'filters' => false,
+        'layer-sets' => false,
+        'layers' => false,
+        'variants' => false,
+        'output-destinations' => false,
+        'autoGrid' => false,
+        'zoom' => false,
+    ];
+
+    // If ?list is set, load everything
+    if (isset($_GET['list']) || isset($_GET['translate'])) {
+        foreach ($load as $key => $value) {
+            $load[$key] = true;
+        }
+    } else {
+        // Get script content early to determine what to load
+        $script_content = array_get($_GET, 'q') ?? @file_get_contents('scripts/'.array_get($_GET, 'f').'.php') ?? '';
+
+        // Search for keywords in script
+        if (str_contains($script_content, 'devices')) $load['devices'] = true;
+        if (str_contains($script_content, 'sources')) $load['sources'] = true;
+        if (str_contains($script_content, 'filters')) $load['filters'] = true;
+        if (str_contains($script_content, 'layer-sets')) $load['layer-sets'] = true;
+        if (str_contains($script_content, 'layers')) $load['layers'] = true;
+        if (str_contains($script_content, 'variants')) $load['variants'] = true;
+        if (str_contains($script_content, 'output-destinations')) $load['output-destinations'] = true;
+        if (str_contains($script_content, 'autoGrid')) $load['autoGrid'] = true;
+        if (str_contains($script_content, 'zoom')) $load['zoom'] = true;
+
+        // Fallback: if nothing found, load everything (safety)
+        if (!in_array(true, $load)) {
+            foreach ($load as $key => $value) {
+                $load[$key] = true;
+            }
+        }
+    }
+
 initial_build_namedAPI:
     build_namedAPI();
 
@@ -990,6 +1106,11 @@ read_script:
         'getid(' => 'getID(',
         'wait(' => 'wait(',
         'run(' => 'run(',
+        'zoomjoin(' => 'zoomJoin(',
+        'zoomleave(' => 'zoomLeave(',
+        'zoomend(' => 'zoomEnd(',
+        'zoomparticipants(' => 'zoomParticipants(',
+        'zoommeetingaction(' => 'zoomMeetingAction(',
     ];
     $script = str_ireplace(array_keys($replacements), array_values($replacements), $script);
 
@@ -1549,6 +1670,272 @@ script_functions:
 
         debug_print('comments', "pushComment() called: path=$path\n");
         queue_action($current_frame, $path, '', $payload, false);  // false = don't merge, each comment is separate
+    }
+
+    // ==================== ZOOM FUNCTIONS ====================
+
+    /**
+     * Helper function to build Zoom API URL from host path
+     */
+    function _buildZoomUrl($host_path, $endpoint) {
+        global $configuration;
+
+        $path = trim($host_path, '/');
+        $parts = explode('/', $path);
+
+        // Accept "hosts/XXX" format
+        if (count($parts) < 2 || $parts[0] !== 'hosts') {
+            debug_print('zoom', "_buildZoomUrl() ERROR: Invalid path '$host_path'. Use 'hosts/HOSTNAME'\n");
+            return null;
+        }
+
+        $host_name = $parts[1];
+        $host = array_get($configuration, 'hosts/'.$host_name);
+        $protocol = array_get($configuration, 'protocol/'.$host_name, default: 'http://');
+        $port = array_get($configuration, 'ports/'.$host_name, default: '8989');
+        $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
+
+        if ($host === null) {
+            debug_print('zoom', "_buildZoomUrl() ERROR: Host '$host_name' not found in configuration\n");
+            return null;
+        }
+
+        $url = $protocol . $host . ':' . $port . '/api/v1/zoom/' . $endpoint;
+        return ['url' => $url, 'pwd' => $pwd_hash, 'host_name' => $host_name];
+    }
+
+    /**
+     * Helper function to get/set Zoom credentials from datastore
+     */
+    function _getZoomDatastorePath($host_path) {
+        // We need a document path for the datastore
+        // Use the first available document for this host
+        $path = trim($host_path, '/');
+        $parts = explode('/', $path);
+        $host_name = $parts[1] ?? 'master';
+
+        $docs = namedAPI_get('hosts/'.$host_name.'/documents');
+        if (!is_array($docs) || empty($docs)) {
+            return null;
+        }
+
+        $first_doc = array_key_first($docs);
+        return 'hosts/'.$host_name.'/documents/'.$first_doc.'/datastores/zoom-credentials';
+    }
+
+    /**
+     * Join a Zoom meeting
+     * Credentials are stored in datastore and reused if not provided
+     *
+     * @param string $host_path Host path (e.g., 'hosts/master')
+     * @param string|null $meetingid Meeting ID (optional if previously stored)
+     * @param string|null $passcode Meeting passcode (optional)
+     * @param array $options Optional: displayname, zoomaccountname, virtualcamera (bool)
+     * @return bool Success
+     */
+    function zoomJoin($host_path, $meetingid = null, $passcode = null, $options = []) {
+        $url_data = _buildZoomUrl($host_path, 'join');
+        if ($url_data === null) return false;
+
+        $datastore_path = _getZoomDatastorePath($host_path);
+        $stored = null;
+
+        // Get stored credentials
+        if ($datastore_path !== null) {
+            $stored = getDatastore($datastore_path);
+        }
+
+        // If no meetingid provided, use stored one
+        if ($meetingid === null) {
+            $meetingid = $stored['meetingid'] ?? null;
+            $passcode = $passcode ?? $stored['passcode'] ?? null;
+        }
+
+        if ($meetingid === null) {
+            debug_print('zoom', "zoomJoin() ERROR: meetingid is required (not provided and not stored)\n");
+            return false;
+        }
+
+        // Check if credentials are the same AND meeting is active
+        $same_credentials = ($stored['meetingid'] ?? null) === $meetingid
+                         && ($stored['passcode'] ?? null) === $passcode;
+
+        // Check if we're already in a meeting via namedAPI
+        $host_path_clean = trim($host_path, '/');
+        $participant_count = namedAPI_get($host_path_clean . '/zoom/participants-count');
+
+        if ($participant_count !== null && $participant_count > 0 && $same_credentials) {
+            debug_print('zoom', "zoomJoin() skipped: already in meeting with same credentials\n");
+            return true;
+        }
+
+        // Store credentials for future use
+        if ($datastore_path !== null) {
+            setDatastore($datastore_path, [
+                'meetingid' => $meetingid,
+                'passcode' => $passcode
+            ]);
+        }
+
+        // Build URL with parameters
+        $params = ['meetingid' => $meetingid];
+        if ($passcode !== null) {
+            $params['passcode'] = $passcode;
+        }
+        // Optional parameters: displayname, zoomaccountname, virtualcamera
+        if (isset($options['displayname'])) {
+            $params['displayname'] = $options['displayname'];
+        }
+        if (isset($options['zoomaccountname'])) {
+            $params['zoomaccountname'] = $options['zoomaccountname'];
+        }
+        if (isset($options['virtualcamera'])) {
+            $params['virtualcamera'] = $options['virtualcamera'] ? 'true' : 'false';
+        }
+        $url = $url_data['url'] . '?' . http_build_query($params);
+
+        debug_print('zoom', "zoomJoin() called: url=$url\n");
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        debug_print('zoom', "zoomJoin() response: HTTP $http_code\n");
+
+        return $http_code >= 200 && $http_code < 300;
+    }
+
+    /**
+     * Leave the current Zoom meeting
+     *
+     * @param string $host_path Host path (e.g., 'hosts/master')
+     * @return bool Success
+     */
+    function zoomLeave($host_path) {
+        $url_data = _buildZoomUrl($host_path, 'leave');
+        if ($url_data === null) return false;
+
+        debug_print('zoom', "zoomLeave() called: url={$url_data['url']}\n");
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        debug_print('zoom', "zoomLeave() response: HTTP $http_code\n");
+
+        return $http_code >= 200 && $http_code < 300;
+    }
+
+    /**
+     * End the current Zoom meeting (host only)
+     *
+     * @param string $host_path Host path (e.g., 'hosts/master')
+     * @return bool Success
+     */
+    function zoomEnd($host_path) {
+        $url_data = _buildZoomUrl($host_path, 'end');
+        if ($url_data === null) return false;
+
+        debug_print('zoom', "zoomEnd() called: url={$url_data['url']}\n");
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        debug_print('zoom', "zoomEnd() response: HTTP $http_code\n");
+
+        return $http_code >= 200 && $http_code < 300;
+    }
+
+    /**
+     * Get list of Zoom meeting participants
+     *
+     * @param string $host_path Host path (e.g., 'hosts/master')
+     * @return array|null Array of participants or null on error
+     */
+    function zoomParticipants($host_path) {
+        $url_data = _buildZoomUrl($host_path, 'participants');
+        if ($url_data === null) return null;
+
+        debug_print('zoom', "zoomParticipants() called: url={$url_data['url']}\n");
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        debug_print('zoom', "zoomParticipants() response: HTTP $http_code\n");
+
+        if ($http_code >= 200 && $http_code < 300 && $response !== false) {
+            $data = json_decode($response, true);
+            return $data;
+        }
+
+        return null;
+    }
+
+    /**
+     * Perform a Zoom meeting action (mute, unmute, lock, etc.)
+     *
+     * @param string $host_path Host path (e.g., 'hosts/master')
+     * @param string $command Command to perform (e.g., 'muteAll', 'lockMeeting', 'lowerAllHands')
+     * @return bool Success
+     */
+    function zoomMeetingAction($host_path, $command) {
+        $url_data = _buildZoomUrl($host_path, 'meetingaction');
+        if ($url_data === null) return false;
+
+        // Build URL with command
+        $url = $url_data['url'] . '?command=' . urlencode($command);
+
+        debug_print('zoom', "zoomMeetingAction() called: url=$url\n");
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        debug_print('zoom', "zoomMeetingAction() response: HTTP $http_code\n");
+
+        return $http_code >= 200 && $http_code < 300;
     }
 
     /**
