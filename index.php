@@ -17,6 +17,11 @@ init:
 
 
 functions:
+    function var_dump_inline($var) {
+        ob_start();
+        var_dump($var);
+        return ob_get_clean();
+    }
     function debug_print($key, $message, $frame=null) {
         global $debug, $OUTPUT, $current_frame;
         if ($debug === true) {
@@ -951,6 +956,7 @@ read_script:
     $script = $script."\n"."// Automatic script end:\n".';'."\n".'setSleep(0, false);';
 
     $replacements = [
+        'islive(' => 'isLive(',
         'setlive(' => 'setLive(',
         'setoff(' => 'setOff(',
         'togglelive(' => 'toggleLive(',
@@ -1111,6 +1117,32 @@ script_functions:
             return;
         }
         queue_action($current_frame, $namedAPI_path, 'toggleLive');
+    }
+
+    /**
+     * Check if a layer, variant, layer-set, or output-destination is live/active
+     *
+     * @param string $namedAPI_path Path to check
+     * @return bool|null true = live/active, false = not live/inactive, null = path not found or no such field
+     */
+    function isLive($namedAPI_path) {
+        $namedAPI_path = trim($namedAPI_path, '/');
+
+        // Detect if this is a layer-set (uses 'active' field instead of 'live-state')
+        if (str_contains($namedAPI_path, '/layer-sets/')) {
+            $active = namedAPI_get($namedAPI_path . '/active');
+            if ($active === null) {
+                return null;
+            }
+            return $active === true;
+        }
+
+        // For layers, variants, output-destinations: check 'live-state'
+        $live_state = namedAPI_get($namedAPI_path . '/live-state');
+        if ($live_state === null) {
+            return null;
+        }
+        return $live_state === 'live';
     }
 
     function recall($namedAPI_path) {
@@ -2185,13 +2217,13 @@ script_functions:
             $video_volume = $audio_layer_exists ? 0.0 : 1.0;
 
             // Exclusive layer takes FULL document (ignoring margins)
-            setLive($video_layer);
+            if (isLive($video_layer) !== true) setLive($video_layer);
             setPIPWindowLayerAppearance($video_layer, $doc_width, $doc_height, 0, 0, $document_path, $color_highlight, 0, 0, $video_volume);
 
             // Handle audio layer for exclusive (only if it exists)
             if ($audio_layer_exists) {
                 debug_print($document_path, "EXCLUSIVE: setLive + volume=1.0 for $audio_layer\n");
-                setLive($audio_layer);
+                if (isLive($audio_layer) !== true) setLive($audio_layer);
                 setValue($audio_layer, ['volume' => 1.0]);
             }
 
@@ -2216,12 +2248,12 @@ script_functions:
                     $other_video_volume = ($status === 'audio-only') ? 1.0 : 0.0;
                 }
 
-                setLive($other_video_layer);
+                if (isLive($other_video_layer) !== true) setLive($other_video_layer);
                 setPIPWindowLayerAppearance($other_video_layer, 0, 0, $center_y, $center_x, $document_path, $color_default, 0, 0, $other_video_volume);
 
                 // Handle audio layer for other positions (only if it exists)
                 if ($other_audio_exists) {
-                    setLive($other_audio_layer);
+                    if (isLive($other_audio_layer) !== true) setLive($other_audio_layer);
                     // Keep audio based on status
                     $other_audio_volume = ($status === 'video-and-audio' || $status === 'audio-only') ? 1.0 : 0.0;
                     setValue($other_audio_layer, ['volume' => $other_audio_volume]);
@@ -2352,11 +2384,11 @@ script_functions:
                 // Volume logic: if a_* exists, av_* always gets volume=0
                 $presenter_video_volume = $presenter_audio_exists ? 0.0 : (($presenter_status === 'video-and-audio' || $presenter_status === 'exclusive') ? 1.0 : 0.0);
 
-                setLive($presenter_video);
+                if (isLive($presenter_video) !== true) setLive($presenter_video);
                 setPIPWindowLayerAppearance($presenter_video, $final_width, $final_height, $final_top, $final_left, $document_path, $presenter_border_color, $border_width, $corner_radius, $presenter_video_volume);
 
                 if ($presenter_audio_exists) {
-                    setLive($presenter_audio);
+                    if (isLive($presenter_audio) !== true) setLive($presenter_audio);
                     $audio_volume = ($presenter_status === 'video-and-audio' || $presenter_status === 'audio-only' || $presenter_status === 'exclusive') ? 1.0 : 0.0;
                     setValue($presenter_audio, ['volume' => $audio_volume]);
                 }
@@ -2496,17 +2528,16 @@ script_functions:
                             // Volume logic: if a_* exists, av_* always gets volume=0
                             $video_volume = $audio_layer_exists ? 0.0 : (($status === 'video-and-audio') ? 1.0 : 0.0);
 
-                            setLive($video_layer);
+                            if (isLive($video_layer) !== true) setLive($video_layer);
                             setPIPWindowLayerAppearance($video_layer, $width, $height, $y, $x, $document_path, $border_color, $border_width_normal, $corner_radius, $video_volume);
 
                             // Handle audio layer (only if it exists)
                             if ($audio_layer_exists) {
-                                setLive($audio_layer);
+                                if (isLive($audio_layer) !== true) setLive($audio_layer);
                                 setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
                             }
                         } else {
                             // Non-visible states: exclude, off, audio-only
-                            $video_live_state = namedAPI_get($video_layer . '/live-state');
 
                             // Volume logic for av_*: if a_* exists, av_* always gets volume=0
                             // Exception: audio-only without a_* layer gets volume=1.0 (audio comes from av_*)
@@ -2520,7 +2551,7 @@ script_functions:
                             $a_volume = ($status === 'audio-only') ? 1.0 : 0.0;
 
                             if ($status === 'exclude') {
-                                if ($video_live_state === 'live') {
+                                if (isLive($video_layer) === true) {
                                     setPIPWindowLayerAppearance($video_layer, $width, $height, $y, $x, $document_path, $color_default, 0, 0, $av_volume);
                                     $delayed_off[] = $video_layer;
 
@@ -2531,21 +2562,21 @@ script_functions:
                                     }
                                 }
                             } elseif ($status === 'off') {
-                                setLive($video_layer);
+                                if (isLive($video_layer) !== true) setLive($video_layer);
                                 setPIPWindowLayerAppearance($video_layer, $width, $height, $y, $x, $document_path, $color_default, 0, 0, $av_volume);
 
                                 // Handle audio layer (only if it exists)
                                 if ($audio_layer_exists) {
-                                    setLive($audio_layer);
+                                    if (isLive($audio_layer) !== true) setLive($audio_layer);
                                     setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             } elseif ($status === 'audio-only') {
-                                setLive($video_layer);
+                                if (isLive($video_layer) !== true) setLive($video_layer);
                                 setPIPWindowLayerAppearance($video_layer, $width, $height, $y, $x, $document_path, $color_default, 0, 0, $av_volume);
 
                                 // Handle audio layer (only if it exists)
                                 if ($audio_layer_exists) {
-                                    setLive($audio_layer);
+                                    if (isLive($audio_layer) !== true) setLive($audio_layer);
                                     setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             }
@@ -2579,12 +2610,12 @@ script_functions:
                         // Volume logic for a_*
                         $a_volume = ($presenter_status === 'audio-only') ? 1.0 : 0.0;
 
-                        setLive($presenter_video);
+                        if (isLive($presenter_video) !== true) setLive($presenter_video);
                         setPIPWindowLayerAppearance($presenter_video, 0, 0, $center_y, $center_x, $document_path, $color_default, 0, 0, $av_volume);
 
                         // Handle audio layer (only if it exists)
                         if ($presenter_audio_exists) {
-                            setLive($presenter_audio);
+                            if (isLive($presenter_audio) !== true) setLive($presenter_audio);
                             setValue($presenter_audio, ['volume' => $a_volume]);
                         }
                     }
@@ -2674,12 +2705,12 @@ script_functions:
                         // Volume logic: if a_* exists, av_* always gets volume=0
                         $av_volume = $audio_layer_exists ? 0.0 : (($status === 'audio-only') ? 1.0 : 0.0);
 
-                        setLive($video_layer);
+                        if (isLive($video_layer) !== true) setLive($video_layer);
                         setPIPWindowLayerAppearance($video_layer, 0, 0, $center_y, $center_x, $document_path, $color_default, 0, 0, $av_volume);
 
                         // Handle audio layer (only if it exists)
                         if ($audio_layer_exists) {
-                            setLive($audio_layer);
+                            if (isLive($audio_layer) !== true) setLive($audio_layer);
                             setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
                         }
                     }
@@ -2764,12 +2795,12 @@ script_functions:
                     $video_volume = $audio_layer_exists ? 0.0 : (($status === 'video-and-audio') ? 1.0 : 0.0);
 
                     // The ONE visible layer takes full group area
-                    setLive($video_layer);
+                    if (isLive($video_layer) !== true) setLive($video_layer);
                     setPIPWindowLayerAppearance($video_layer, $group_width, $group_height, $group_top, $group_left, $document_path, $border_color, $border_width_normal, $corner_radius, $video_volume);
 
                     // Handle audio layer (only if it exists)
                     if ($audio_layer_exists) {
-                        setLive($audio_layer);
+                        if (isLive($audio_layer) !== true) setLive($audio_layer);
                         setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
                     }
                 } else {
@@ -2777,12 +2808,12 @@ script_functions:
                     $video_volume = $audio_layer_exists ? 0.0 : (($status === 'audio-only') ? 1.0 : 0.0);
 
                     // Non-visible: shrink to center of group
-                    setLive($video_layer);
+                    if (isLive($video_layer) !== true) setLive($video_layer);
                     setPIPWindowLayerAppearance($video_layer, 0, 0, $center_y, $center_x, $document_path, $color_default, 0, 0, $video_volume);
 
                     // Handle audio layer (only if it exists)
                     if ($audio_layer_exists) {
-                        setLive($audio_layer);
+                        if (isLive($audio_layer) !== true) setLive($audio_layer);
                         setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
                     }
                 }
@@ -2848,12 +2879,12 @@ script_functions:
             // Volume logic: if a_* exists, av_* always gets volume=0
             $video_volume = $audio_layer_exists ? 0.0 : (($status === 'video-and-audio') ? 1.0 : 0.0);
 
-            setLive($video_layer);
+            if (isLive($video_layer) !== true) setLive($video_layer);
             setPIPWindowLayerAppearance($video_layer, $tile_width, $tile_height, $y, $x, $document_path, $border_color, $border_width_normal, $corner_radius, $video_volume);
 
             // Handle audio layer (only if it exists)
             if ($audio_layer_exists) {
-                setLive($audio_layer);
+                if (isLive($audio_layer) !== true) setLive($audio_layer);
                 setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
             }
 
@@ -2891,12 +2922,12 @@ script_functions:
             // Volume logic: if a_* exists, av_* always gets volume=0
             $video_volume = $audio_layer_exists ? 0.0 : (($status === 'audio-only') ? 1.0 : 0.0);
 
-            setLive($video_layer);
+            if (isLive($video_layer) !== true) setLive($video_layer);
             setPIPWindowLayerAppearance($video_layer, 0, 0, $center_y, $center_x, $document_path, $color_default, 0, 0, $video_volume);
 
             // Handle audio layer (only if it exists)
             if ($audio_layer_exists) {
-                setLive($audio_layer);
+                if (isLive($audio_layer) !== true) setLive($audio_layer);
                 setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
             }
         }

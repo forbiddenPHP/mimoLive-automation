@@ -103,6 +103,24 @@ These are the officially supported commands for controlling mimoLive:
   toggleLive($base);  // Toggle document live state
   ```
 
+- **`isLive($namedAPI_path)`** - Check if a layer, variant, layer-set, or output-destination is live/active
+  ```php
+  if (isLive($base.'layers/Comments') === true) {
+      // Layer is live
+  }
+
+  if (isLive($base.'layer-sets/RunA') === false) {
+      // Layer-set is inactive
+  }
+
+  if (isLive($base.'layers/NonExistent') === null) {
+      // Path not found or field doesn't exist
+  }
+  ```
+  **Returns:** `true` (live/active), `false` (off/inactive), or `null` (path not found)
+
+  *Note: For layer-sets, checks the `active` field. For all others (layers, variants, output-destinations), checks `live-state`.*
+
 - **`recall($namedAPI_path)`** - Recall a layer-set
   ```php
   recall($base.'layer-sets/RunA');
