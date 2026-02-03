@@ -1,5 +1,6 @@
 <?php
 
+// Replace this with a real document or open autoGridTest for this.
 $base = 'hosts/master/documents/autoGridTest';
 $test = [];
 // Test with window parameters: top, left, bottom, right
