@@ -543,7 +543,7 @@ These functions are available but are typically used internally:
 
 #### Auto Grid Layout
 
-- **`setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0)`** - Automatically arrange video placers in intelligent layouts for video conferences
+- **`setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0, $audioTracking=true, $audioTrackingAutoSwitching=false)`** - Automatically arrange video placers in intelligent layouts for video conferences
 
   **Overview:**
   Creates balanced layouts for multiple video sources with automatic aspect-ratio preservation:
@@ -556,7 +556,7 @@ These functions are available but are typically used internally:
   ```php
   $base = 'hosts/master/documents/MyShow';
 
-  // Simple grid with 2% gap, 30px margins
+  // Simple grid with 2% gap, 30px margins (speaker highlight enabled)
   setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 30, 30, 30, 30);
 
   // Fullscreen without borders/rounding (gap=0)
@@ -567,6 +567,12 @@ These functions are available but are typically used internally:
 
   // Space at top for title/logo (300px)
   setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 300, 30, 30, 30);
+
+  // With auto-switching: audio-only participants auto-show when speaking
+  setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 30, 30, 30, 30, -65.0, true, true);
+
+  // Without speaker highlight (always default color)
+  setAutoGrid($base, '2%', '#FFFFFFFF', '#FF00FFFF', 30, 30, 30, 30, -65.0, false, false);
   ```
 
   **Layer Naming Convention:**
@@ -658,6 +664,14 @@ These functions are available but are typically used internally:
   - `$bottom` (optional): Bottom margin - pixels or percentage, default `0`
   - `$right` (optional): Right margin - pixels or percentage, default `0`
   - `$threshold` (optional): Audio level threshold for speaker detection in dB, default `-65.0`
+  - `$audioTracking` (optional): Enable speaker highlight color, default `true`
+    - `true`: Border switches to `$color_highlight` when speaker is active
+    - `false`: Always uses `$color_default` (no speaker detection)
+  - `$audioTrackingAutoSwitching` (optional): Auto-activate video when audio-only speaker talks, default `false`
+    - When `true`: Layers with status `audio-only` automatically switch to `video-and-audio` when speaking
+    - Only switches ON (never automatically switches OFF)
+    - Presenter (`s_av_presenter`) is excluded from auto-switching
+    - Disabled when any layer is in `exclusive` mode
 
   **Examples:**
 
@@ -677,6 +691,13 @@ These functions are available but are typically used internally:
   ```php
   // No gap = no borders, no rounding
   setAutoGrid($base, 0, '#FFFFFF', '#FF00FF', 0, 0, 0, 0);
+  ```
+
+  Auto-switching conference (audio-only participants auto-show when speaking):
+  ```php
+  // Setup: s_av_pos_1..6_group_1 with some on audio-only
+  // When someone on audio-only speaks, they auto-switch to video-and-audio
+  setAutoGrid($base, '2%', '#FFFFFF', '#FF00FF', 30, 30, 30, 30, -65.0, true, true);
   ```
 
   **mimoLive Control Surface Compatibility:**

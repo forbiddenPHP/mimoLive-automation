@@ -1970,7 +1970,7 @@ script_functions:
         return $color_default;
     }
 
-    function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0) {
+    function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0, $audioTracking=true, $audioTrackingAutoSwitching=false) {
         $document_path = trim($document_path, '/');
 
         // Datastore path for autoGrid state
@@ -2316,8 +2316,8 @@ script_functions:
                     $border_width = 0;
                 }
 
-                // Border color: only use highlight if a_* layer exists
-                if ($presenter_audio_exists && $border_width > 0) {
+                // Border color: only use highlight if a_* layer exists and audioTracking is enabled
+                if ($audioTracking && $presenter_audio_exists && $border_width > 0) {
                     $presenter_border_color = getAudioHighlightColor($presenter_audio, $color_default, $color_highlight, $threshold) ?? $color_default;
                 } else {
                     $presenter_border_color = $color_default;
@@ -2469,8 +2469,8 @@ script_functions:
                         $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
 
                         if ($status === 'video-and-audio' || $status === 'video-no-audio') {
-                            // Border color: only use highlight if a_* layer exists
-                            if ($audio_layer_exists) {
+                            // Border color: only use highlight if a_* layer exists and audioTracking is enabled
+                            if ($audioTracking && $audio_layer_exists) {
                                 $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
                             } else {
                                 $border_color = $color_default;
@@ -2668,7 +2668,7 @@ script_functions:
                             // Get all positions for this group (including non-visible)
                             $all_positions = $groups_all[$group_name] ?? [];
 
-                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold);
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold, $audioTracking);
                             $idx++;
                         }
                     } else {
@@ -2684,7 +2684,7 @@ script_functions:
                             // Get all positions for this group (including non-visible)
                             $all_positions = $groups_all[$group_name] ?? [];
 
-                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold);
+                            layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold, $audioTracking);
                             $idx++;
                         }
                     }
@@ -2753,9 +2753,36 @@ script_functions:
             deleteDatastore($state_path);
         }
 
+        // ===== PHASE 5: Audio Tracking Auto-Switching =====
+        // Auto-activate video when audio-only layer starts speaking
+        // NOTE: Only switches ON (audio-only → video-and-audio), never OFF
+        // NOTE: Presenter is excluded from auto-switching
+        // NOTE: Disabled when any exclusive is active
+        if ($audioTrackingAutoSwitching && !$has_exclusive) {
+            foreach ($autoGrid as $s_layer_name => $layer_info) {
+                // Skip presenter - no auto-switching for presenter
+                if ($s_layer_name === 's_av_presenter') continue;
+
+                $status = $autoGrid[$s_layer_name]['status'] ?? null;
+                $audio_layer = $autoGrid[$s_layer_name]['audio'] ?? null;
+                $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
+                // Only for audio-only AND when a_* layer exists
+                if ($audio_layer_exists && $status === 'audio-only') {
+                    // Check if speaking (use getAudioHighlightColor with boolean return)
+                    $is_speaking = (getAudioHighlightColor($audio_layer, false, true, $threshold) === true);
+
+                    if ($is_speaking) {
+                        // Speaking → switch to video-and-audio
+                        setLive($document_path . '/layers/' . $s_layer_name . '/variants/video-and-audio');
+                    }
+                }
+            }
+        }
+
     }
 
-    function layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold) {
+    function layoutGroupGrid($document_path, $all_positions, $visible_positions, $group_left, $group_top, $group_width, $group_height, $gap_px, $color_default, $color_highlight, $border_width_normal, $corner_radius, $threshold, $audioTracking) {
         $num_visible = count($visible_positions);
         $num_all = count($all_positions);
         if ($num_all === 0) return;
@@ -2774,8 +2801,8 @@ script_functions:
                 $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
 
                 if ($status === 'video-and-audio' || $status === 'video-no-audio') {
-                    // Border color: only use highlight if a_* layer exists
-                    if ($audio_layer_exists) {
+                    // Border color: only use highlight if a_* layer exists and audioTracking is enabled
+                    if ($audioTracking && $audio_layer_exists) {
                         $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
                     } else {
                         $border_color = $color_default;
@@ -2885,8 +2912,8 @@ script_functions:
             // Check if a_* layer exists
             $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
 
-            // Border color: only use highlight if a_* layer exists
-            if ($audio_layer_exists) {
+            // Border color: only use highlight if a_* layer exists and audioTracking is enabled
+            if ($audioTracking && $audio_layer_exists) {
                 $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
             } else {
                 $border_color = $color_default;
