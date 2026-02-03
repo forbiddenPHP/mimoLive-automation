@@ -69,6 +69,8 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
    httpRequest(http://localhost:8888/?q=setLive%28%27fullpath%27%29)
   ```
 
+> ⚠️ **Important:** Use `&realtime=true` if mimoLive should wait for the script execution to complete before continuing. **This is only possible if the script does not take longer than 9 seconds!**
+
 ## Supported Commands
 
 **Note**: For brevity, examples use `$base = 'hosts/master/documents/MyShow/';`
