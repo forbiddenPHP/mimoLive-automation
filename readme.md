@@ -190,6 +190,42 @@ These are the officially supported commands for controlling mimoLive:
   ```
   *Note: This function validates that the source is a Web Browser Capture source (`com.boinx.mimoLive.sources.webBrowserSource`) before sending the command.*
 
+#### Media Control
+
+- **`mediaControl($action, $path, $input=null)`** - Control media playback on sources or layers
+  ```php
+  // === SOURCES (no input needed) ===
+  mediaControl('play', $base.'sources/Intro-Video');
+  mediaControl('pause', $base.'sources/Intro-Video');
+  mediaControl('stop', $base.'sources/Intro-Video');
+  mediaControl('skiptostart', $base.'sources/Intro-Video');
+  mediaControl('skiptoend', $base.'sources/Intro-Video');
+  mediaControl('skipback', $base.'sources/Intro-Video');    // Jump back ~10 seconds
+  mediaControl('skipahead', $base.'sources/Intro-Video');   // Jump ahead ~10 seconds
+  mediaControl('reverse', $base.'sources/Intro-Video');     // Play backwards
+  mediaControl('rewind', $base.'sources/Intro-Video');      // Fast rewind
+  mediaControl('fastforward', $base.'sources/Intro-Video'); // Fast forward
+  mediaControl('record', $base.'sources/Camera-Recording'); // Start/stop recording
+  mediaControl('shuffle', $base.'sources/Music-Playlist');  // Toggle shuffle mode
+  mediaControl('repeat', $base.'sources/Background-Music'); // Toggle repeat mode
+
+  // === LAYERS (input required: 'A'-'K' or full key like 'tvIn_VideoSourceAImage') ===
+  mediaControl('play', $base.'layers/Video-Playback', 'A');
+  mediaControl('pause', $base.'layers/Video-Playback', 'B');
+  mediaControl('stop', $base.'layers/Placer', 'tvIn_VideoSourceAImage');
+  mediaControl('skiptostart', $base.'layers/Video-Playback', 'C');
+
+  // === VARIANTS (path is shortened to layer level, input required) ===
+  mediaControl('play', $base.'layers/Video-Playback/variants/Intro', 'A');
+  mediaControl('pause', $base.'layers/Video-Playback/variants/Outro', 'A');
+  ```
+  *Parameters:*
+  - `$action` (required): One of `play`, `pause`, `stop`, `reverse`, `rewind`, `fastforward`, `skiptostart`, `skiptoend`, `skipback`, `skipahead`, `record`, `shuffle`, `repeat`
+  - `$path` (required): Path to source, layer, or variant
+  - `$input` (optional): Required for layers/variants - input slot identifier ('A'-'K' or full key)
+
+  *Note: For variants, the path is automatically shortened to the layer level since media control operates on layer inputs. Invalid actions are rejected with a debug warning.*
+
 #### Comments
 
 - **`pushComment($path, $comment_data)`** - Push a comment to mimoLive's comment system
@@ -550,15 +586,9 @@ These functions are available but are typically used internally:
      a_pos_1_group_1     // Audio for position 1, group 1
      a_presenter         // Audio for presenter
      ```
+     When an `a_*` layer exists for a position, the corresponding `av_*` layer always gets `volume: 0` and the `a_*` layer receives the audio volume. This also enables speaker detection (highlight color).
 
-  3. **Audio Tracking Layers (optional):**
-     ```
-     at_pos_1_group_1    // Audio tracking for position 1, group 1
-     at_presenter        // Audio tracking for presenter
-     ```
-     These layers use the "Automation Audio-Level to API" layer type from mimoLive. They provide reliable real-time audio level data for speaker detection. The video source is automatically synced from the corresponding `av_*` layer.
-
-  4. **Control Script Layers (with variants):**
+  3. **Control Script Layers (with variants):**
      ```
      s_av_pos_1_group_1  // Controls av_pos_1_group_1
      s_av_pos_2_group_1  // Controls av_pos_2_group_1
@@ -608,14 +638,13 @@ These functions are available but are typically used internally:
   - Visible layers expand to optimally use available space
   - Hidden layers shrink to center of their original relative position
 
-  **Speaker Detection (Audio Tracking):**
+  **Speaker Detection (via Audio Layers):**
 
-  When audio tracking layers (`at_*`) are present, the system automatically highlights the active speaker:
+  When `a_*` layers exist, the system automatically highlights the active speaker:
   - Border color switches from `$color_default` to `$color_highlight` when audio level exceeds `$threshold`
-  - Requires the "Automation Audio-Level to API" layer type from mimoLive
-  - Video source is automatically synced from `av_*` to `at_*` layers (only when changed)
-  - Audio level is read from `output-values/tvOut_VideoSourceAAudioLevel`
+  - Audio level is read from the `a_*` layer's `output-values/tvOut_VideoSourceAAudioLevel`
   - Detection triggers when: `audio_level != 0 AND audio_level > $threshold`
+  - **Important**: If no `a_*` layer exists for a position, no highlight is applied (only default color)
 
   **Parameters:**
   - `$document_path` (required): Document path (e.g., `'hosts/master/documents/MyShow'`)

@@ -226,7 +226,6 @@ functions:
                             namedAPI_set($doc_path.'/autoGrid/'.$name, [
                                 'video' => $doc_path . '/layers/av_pos_' . $pos . '_group_' . $group,
                                 'audio' => $doc_path . '/layers/a_pos_' . $pos . '_group_' . $group,
-                                'tracking' => $doc_path . '/layers/at_pos_' . $pos . '_group_' . $group,
                                 'group' => $group,
                                 'position' => $pos
                             ]);
@@ -236,8 +235,7 @@ functions:
                         if ($name === 's_av_presenter') {
                             namedAPI_set($doc_path.'/autoGrid/'.$name, [
                                 'video' => $doc_path . '/layers/av_presenter',
-                                'audio' => $doc_path . '/layers/a_presenter',
-                                'tracking' => $doc_path . '/layers/at_presenter'
+                                'audio' => $doc_path . '/layers/a_presenter'
                             ]);
                         }
 
@@ -973,6 +971,43 @@ skipped:
     if ($everything_is_fine!==true) {exit(1);}
 
 script_functions:
+    function mediaControl($action, $path, $input = null) {
+        global $current_frame;
+
+        // Valid media control actions (= API endpoints)
+        $valid_actions = [
+            'play', 'pause', 'stop', 'reverse', 'rewind', 'fastforward',
+            'skiptostart', 'skiptoend', 'skipback', 'skipahead',
+            'record', 'shuffle', 'repeat'
+        ];
+
+        // Validate action
+        if (!in_array($action, $valid_actions)) {
+            debug_print($path, "mediaControl() ERROR: Invalid action '$action'. Valid: " . implode(', ', $valid_actions) . "\n");
+            return;
+        }
+
+        // For variants: shorten path to layer level
+        if (strpos($path, '/variants/') !== false) {
+            $path = explode('/variants/', $path)[0];
+            debug_print($path, "mediaControl() Note: Variant path shortened to layer level\n");
+        }
+
+        if (build_api_url($path) === null) {
+            debug_print($path, "mediaControl() ERROR: Invalid path '$path'\n");
+            return;
+        }
+
+        // Build endpoint with optional input parameter
+        $endpoint = $action;
+        if ($input !== null) {
+            $endpoint .= '?input=' . rawurlencode($input);
+        }
+
+        debug_print($path, "mediaControl() called: action=$action, path=$path" . ($input ? ", input=$input" : "") . "\n");
+        queue_action($current_frame, $path, $endpoint);
+    }
+
     function setLive($namedAPI_path) {
         global $current_frame;
         debug_print($namedAPI_path, "setLive() called: path=$namedAPI_path\n");
@@ -1917,16 +1952,18 @@ script_functions:
         __increment_decrement($base, $var, $val, 'decrement');
     }
 
-    function getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold = -65.0) {
-        if ($tracking_layer === null) {
-            return $color_default;
+    function getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold = -65.0) {
+        if ($audio_layer === null) {
+            return null;  // No a_* layer exists - caller should not apply highlight
         }
-        // Check if tracking layer exists
-        $tracking_id = namedAPI_get($tracking_layer . '/id');
-        if ($tracking_id === null) {
-            return $color_default;
+        // Check if audio layer exists
+        $audio_id = namedAPI_get($audio_layer . '/id');
+        if ($audio_id === null) {
+            return null;  // a_* layer doesn't exist - caller should not apply highlight
         }
-        $audio_level = namedAPI_get($tracking_layer . '/output-values/tvOut_VideoSourceAAudioLevel');
+        $level0=namedAPI_get($audio_layer . '/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel0');
+        $level1=namedAPI_get($audio_layer . '/input-values/tvGroup_Source__Audio_TypeAudioAudioLevel1');
+        $audio_level = ($level0+$level1)/2;
         if ($audio_level !== null && (float)$audio_level != 0 && (float)$audio_level > $threshold) {
             return $color_highlight;
         }
@@ -1936,8 +1973,8 @@ script_functions:
     function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0) {
         $document_path = trim($document_path, '/');
 
-        // Start session if needed
-        if (!isset($_SESSION)) session_start();
+        // Datastore path for autoGrid state
+        $state_path = $document_path . '/datastores/autoGrid-state';
 
         // Load autoGrid structure from namedAPI
         $autoGrid = namedAPI_get($document_path . '/autoGrid');
@@ -1946,24 +1983,25 @@ script_functions:
             return ['delayed_off' => []];
         }
 
-        // Sync video source from av_* to at_* (tracking layers)
+        // Sync video source from av_* to a_* (audio layers)
+        // When av_* VideoSourceAImage changes, update a_* Audio input to match
         foreach ($autoGrid as $s_layer_name => $layer_info) {
             $video_layer = $layer_info['video'] ?? null;
-            $tracking_layer = $layer_info['tracking'] ?? null;
+            $audio_layer = $layer_info['audio'] ?? null;
 
-            if ($video_layer && $tracking_layer) {
-                // Check if tracking layer exists
-                $tracking_id = namedAPI_get($tracking_layer . '/id');
-                if ($tracking_id !== null) {
-                    // Get source from both layers
+            if ($video_layer && $audio_layer) {
+                // Check if audio layer exists
+                $audio_id = namedAPI_get($audio_layer . '/id');
+                if ($audio_id !== null) {
+                    // Get video source from av_* layer
                     $video_source = namedAPI_get($video_layer . '/input-values/tvIn_VideoSourceAImage');
-                    $tracking_source = namedAPI_get($tracking_layer . '/input-values/tvIn_VideoSourceAImage');
+                    // Get current audio source from a_* layer
+                    $audio_source = namedAPI_get($audio_layer . '/input-values/tvGroup_Source__Audio_TypeAudio');
                     // Only sync if sources differ
-                    if ($video_source !== null && $video_source !== $tracking_source) {
-                        setLive($tracking_layer);
-                        setValue($tracking_layer, [
+                    if ($video_source !== null && $video_source !== $audio_source) {
+                        setValue($audio_layer, [
                             'input-values' => [
-                                'tvIn_VideoSourceAImage' => $video_source
+                                'tvGroup_Source__Audio_TypeAudio' => $video_source
                             ]
                         ]);
                     }
@@ -2035,8 +2073,8 @@ script_functions:
 
         // Only do transitions if we have MORE THAN ONE exclusive
         if (count($exclusive_layers) > 1) {
-            // Get last exclusive from session to find out which one is new
-            $last_exclusive = $_SESSION[$document_path . '/lastExclusive'] ?? null;
+            // Get last exclusive from datastore to find out which one is new
+            $last_exclusive = getDatastore($state_path, 'lastExclusive');
 
             // Find the new exclusive (the one that's NOT the last one)
             $new_exclusive = null;
@@ -2063,8 +2101,8 @@ script_functions:
                     }
                 }
 
-                // Store new exclusive in session and return - NO calculations
-                $_SESSION[$document_path . '/lastExclusive'] = $new_exclusive;
+                // Store new exclusive in datastore and return - NO calculations
+                setDatastore($state_path, ['lastExclusive' => $new_exclusive]);
                 return;
             }
         }
@@ -2087,6 +2125,19 @@ script_functions:
         if ($has_exclusive && $exclusive_layer_info) {
             // EXCLUSIVE MODE: One layer fullscreen, all others shrink to center
             $video_layer = $exclusive_layer_info['video'];
+            $audio_layer = $exclusive_layer_info['audio'] ?? null;
+
+            // Check if a_* layer exists for exclusive layer
+            $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
+            debug_print($document_path, "EXCLUSIVE MODE: video=$video_layer, audio=$audio_layer, a_exists=" . ($audio_layer_exists ? 'YES' : 'NO') . "\n");
+
+            // Volume logic: if a_* exists, av_* always gets volume=0
+            if ($audio_layer_exists) {
+                $video_volume = 0.0;
+            } else {
+                $video_volume = 1.0;
+            }
 
             // Exclusive layer takes FULL document (ignoring margins)
             setLive($video_layer);
@@ -2098,49 +2149,59 @@ script_functions:
                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                     'tvGroup_Appearance__Shape' => 2
                 ],
-                'volume' => 1.0
+                'volume' => $video_volume
             ]);
 
+            // Handle audio layer for exclusive (only if it exists)
+            if ($audio_layer_exists) {
+                debug_print($document_path, "EXCLUSIVE: setLive + volume=1.0 for $audio_layer\n");
+                setLive($audio_layer);
+                setValue($audio_layer, ['volume' => 1.0]);
+            }
+
             // Shrink all other layers to center (size 0, border 0)
-            // Audio is NOT touched - leave it as is
             $center_x = $work_left + ($work_width / 2);
             $center_y = $work_top + ($work_height / 2);
 
             foreach ($autoGrid as $s_layer => $info) {
                 $status = $info['status'] ?? null;
-                $video_layer = $info['video'] ?? null;
+                $other_video_layer = $info['video'] ?? null;
+                $other_audio_layer = $info['audio'] ?? null;
 
-                if (!$video_layer || $status === 'exclusive') continue;
+                if (!$other_video_layer || $status === 'exclusive') continue;
 
-                setLive($video_layer);
-                setValue($video_layer, [
+                // Check if a_* layer exists for this other layer
+                $other_audio_exists = ($other_audio_layer !== null && namedAPI_get($other_audio_layer . '/id') !== null);
+
+                // Volume logic: if a_* exists, av_* always gets volume=0
+                if ($other_audio_exists) {
+                    $other_video_volume = 0.0;
+                } else {
+                    // Keep audio as is based on status (audio-only gets volume, others don't)
+                    $other_video_volume = ($status === 'audio-only') ? 1.0 : 0.0;
+                }
+
+                setLive($other_video_layer);
+                setValue($other_video_layer, [
                     'input-values' => [
                         ...mimoPosition('tvGroup_Geometry__Window', 0, 0, $center_y, $center_x, $document_path),
                         'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
                         'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0,
                         'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                         'tvGroup_Appearance__Shape' => 2
-                    ]
-                    // DO NOT set volume - leave audio as is
-                ]);
-            }
-
-        } elseif (!$has_exclusive) {
-
-            // Case: exclusive (fills FULL document, ignoring margins)
-            if ($status === 'exclusive') {
-                setLive($video_layer);
-                setValue($video_layer, [
-                    'input-values' => [
-                        ...mimoPosition('tvGroup_Geometry__Window', $doc_width, $doc_height, 0, 0, $document_path),
-                        'tvGroup_Appearance__Boarder_Color' => mimoColor($color_default),
-                        'tvGroup_Appearance__Boarder_Width_TypeBoinxY' => 0.00,
-                        'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
-                        'tvGroup_Appearance__Shape' => 2
                     ],
-                    'volume' => 1.0
+                    'volume' => $other_video_volume
                 ]);
+
+                // Handle audio layer for other positions (only if it exists)
+                if ($other_audio_exists) {
+                    setLive($other_audio_layer);
+                    // Keep audio based on status
+                    $other_audio_volume = ($status === 'video-and-audio' || $status === 'audio-only') ? 1.0 : 0.0;
+                    setValue($other_audio_layer, ['volume' => $other_audio_volume]);
+                }
             }
+
         }
 
         // Grid layout for video-and-audio and video-no-audio positions
@@ -2229,8 +2290,10 @@ script_functions:
 
                 $presenter_video = $autoGrid['s_av_presenter']['video'];
                 $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
-                $presenter_tracking = $autoGrid['s_av_presenter']['tracking'] ?? null;
                 $presenter_status = $autoGrid['s_av_presenter']['status'];
+
+                // Check if a_* layer exists
+                $presenter_audio_exists = ($presenter_audio !== null && namedAPI_get($presenter_audio . '/id') !== null);
 
                 // Calculate center point for presenter (for shrinking to size 0)
                 $presenter_center_x = $presenter_left + ($presenter_width / 2);
@@ -2253,7 +2316,20 @@ script_functions:
                     $border_width = 0;
                 }
 
-                $presenter_border_color = ($border_width > 0) ? getAudioHighlightColor($presenter_tracking, $color_default, $color_highlight, $threshold) : $color_default;
+                // Border color: only use highlight if a_* layer exists
+                if ($presenter_audio_exists && $border_width > 0) {
+                    $presenter_border_color = getAudioHighlightColor($presenter_audio, $color_default, $color_highlight, $threshold) ?? $color_default;
+                } else {
+                    $presenter_border_color = $color_default;
+                }
+
+                // Volume logic: if a_* exists, av_* always gets volume=0
+                if ($presenter_audio_exists) {
+                    $presenter_video_volume = 0.0;
+                } else {
+                    $presenter_video_volume = ($presenter_status === 'video-and-audio' || $presenter_status === 'exclusive') ? 1.0 : 0.0;
+                }
+
                 setLive($presenter_video);
                 setValue($presenter_video, [
                     'input-values' => [
@@ -2263,10 +2339,10 @@ script_functions:
                         'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                         'tvGroup_Appearance__Shape' => 2
                     ],
-                    'volume' => ($presenter_status === 'video-and-audio' || $presenter_status === 'exclusive') ? 1.0 : 0.0
+                    'volume' => $presenter_video_volume
                 ]);
 
-                if ($presenter_audio) {
+                if ($presenter_audio_exists) {
                     setLive($presenter_audio);
                     $audio_volume = ($presenter_status === 'video-and-audio' || $presenter_status === 'audio-only' || $presenter_status === 'exclusive') ? 1.0 : 0.0;
                     setValue($presenter_audio, ['volume' => $audio_volume]);
@@ -2349,7 +2425,6 @@ script_functions:
                     foreach ($all_positions as $idx => $position) {
                         $video_layer = $position['video'] ?? null;
                         $audio_layer = $position['audio'] ?? null;
-                        $tracking_layer = $position['tracking'] ?? null;
                         $status = $position['status'] ?? null;
                         if (!$video_layer) continue;
 
@@ -2372,7 +2447,6 @@ script_functions:
                         $position_calcs[] = [
                             'video_layer' => $video_layer,
                             'audio_layer' => $audio_layer,
-                            'tracking_layer' => $tracking_layer,
                             'status' => $status,
                             'x' => $x,
                             'y' => $y_pos,
@@ -2385,15 +2459,30 @@ script_functions:
                     foreach ($position_calcs as $calc) {
                         $video_layer = $calc['video_layer'];
                         $audio_layer = $calc['audio_layer'] ?? null;
-                        $tracking_layer = $calc['tracking_layer'] ?? null;
                         $status = $calc['status'];
                         $x = $calc['x'];
                         $y = $calc['y'];
                         $width = $calc['width'];
                         $height = $calc['height'];
 
+                        // Check if a_* layer exists
+                        $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
                         if ($status === 'video-and-audio' || $status === 'video-no-audio') {
-                            $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
+                            // Border color: only use highlight if a_* layer exists
+                            if ($audio_layer_exists) {
+                                $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
+                            } else {
+                                $border_color = $color_default;
+                            }
+
+                            // Volume logic: if a_* exists, av_* always gets volume=0
+                            if ($audio_layer_exists) {
+                                $video_volume = 0.0;
+                            } else {
+                                $video_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
+                            }
+
                             setLive($video_layer);
                             setValue($video_layer, [
                                 'input-values' => [
@@ -2403,16 +2492,28 @@ script_functions:
                                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                                     'tvGroup_Appearance__Shape' => 2
                                 ],
-                                'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+                                'volume' => $video_volume
                             ]);
 
-                            // Handle optional audio layer
-                            if ($audio_layer) {
+                            // Handle audio layer (only if it exists)
+                            if ($audio_layer_exists) {
                                 setLive($audio_layer);
                                 setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
                             }
                         } else {
+                            // Non-visible states: exclude, off, audio-only
                             $video_live_state = namedAPI_get($video_layer . '/live-state');
+
+                            // Volume logic for av_*: if a_* exists, av_* always gets volume=0
+                            // Exception: audio-only without a_* layer gets volume=1.0 (audio comes from av_*)
+                            if ($audio_layer_exists) {
+                                $av_volume = 0.0;
+                            } else {
+                                $av_volume = ($status === 'audio-only') ? 1.0 : 0.0;
+                            }
+
+                            // Volume logic for a_*: audio-only gets volume=1.0, others get volume=0.0
+                            $a_volume = ($status === 'audio-only') ? 1.0 : 0.0;
 
                             if ($status === 'exclude') {
                                 if ($video_live_state === 'live') {
@@ -2424,13 +2525,13 @@ script_functions:
                                             'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                                             'tvGroup_Appearance__Shape' => 2
                                         ],
-                                        'volume' => 0.0
+                                        'volume' => $av_volume
                                     ]);
                                     $delayed_off[] = $video_layer;
 
-                                    // Handle optional audio layer
-                                    if ($audio_layer) {
-                                        setValue($audio_layer, ['volume' => 0.0]);
+                                    // Handle audio layer (only if it exists)
+                                    if ($audio_layer_exists) {
+                                        setValue($audio_layer, ['volume' => $a_volume]);
                                         $delayed_off[] = $audio_layer;
                                     }
                                 }
@@ -2444,13 +2545,13 @@ script_functions:
                                         'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                                         'tvGroup_Appearance__Shape' => 2
                                     ],
-                                    'volume' => 0.0
+                                    'volume' => $av_volume
                                 ]);
 
-                                // Handle optional audio layer
-                                if ($audio_layer) {
+                                // Handle audio layer (only if it exists)
+                                if ($audio_layer_exists) {
                                     setLive($audio_layer);
-                                    setValue($audio_layer, ['volume' => 0.0]);
+                                    setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             } elseif ($status === 'audio-only') {
                                 setLive($video_layer);
@@ -2462,13 +2563,13 @@ script_functions:
                                         'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                                         'tvGroup_Appearance__Shape' => 2
                                     ],
-                                    'volume' => 1.0
+                                    'volume' => $av_volume
                                 ]);
 
-                                // Handle optional audio layer
-                                if ($audio_layer) {
+                                // Handle audio layer (only if it exists)
+                                if ($audio_layer_exists) {
                                     setLive($audio_layer);
-                                    setValue($audio_layer, ['volume' => 1.0]);
+                                    setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             }
                         }
@@ -2478,16 +2579,30 @@ script_functions:
             } else {
                 // GROUPS MODE
 
-                // Handle presenter if it exists but is not visible (off, audio-only)
+                // Handle presenter if it exists but is not visible (off, audio-only, exclude)
                 if (isset($autoGrid['s_av_presenter'])) {
                     $presenter_status = $autoGrid['s_av_presenter']['status'] ?? null;
                     if ($presenter_status === 'off' || $presenter_status === 'audio-only' || $presenter_status === 'exclude') {
                         $presenter_video = $autoGrid['s_av_presenter']['video'];
                         $presenter_audio = $autoGrid['s_av_presenter']['audio'] ?? null;
 
+                        // Check if a_* layer exists
+                        $presenter_audio_exists = ($presenter_audio !== null && namedAPI_get($presenter_audio . '/id') !== null);
+
                         // Shrink to center of working area
                         $center_x = $work_left + ($work_width / 2);
                         $center_y = $work_top + ($work_height / 2);
+
+                        // Volume logic for av_*: if a_* exists, av_* always gets volume=0
+                        // Exception: audio-only without a_* layer gets volume=1.0
+                        if ($presenter_audio_exists) {
+                            $av_volume = 0.0;
+                        } else {
+                            $av_volume = ($presenter_status === 'audio-only') ? 1.0 : 0.0;
+                        }
+
+                        // Volume logic for a_*
+                        $a_volume = ($presenter_status === 'audio-only') ? 1.0 : 0.0;
 
                         setLive($presenter_video);
                         setValue($presenter_video, [
@@ -2498,13 +2613,13 @@ script_functions:
                                 'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                                 'tvGroup_Appearance__Shape' => 2
                             ],
-                            'volume' => 0.0
+                            'volume' => $av_volume
                         ]);
 
-                        if ($presenter_audio) {
+                        // Handle audio layer (only if it exists)
+                        if ($presenter_audio_exists) {
                             setLive($presenter_audio);
-                            $audio_volume = ($presenter_status === 'audio-only') ? 1.0 : 0.0;
-                            setValue($presenter_audio, ['volume' => $audio_volume]);
+                            setValue($presenter_audio, ['volume' => $a_volume]);
                         }
                     }
                 }
@@ -2586,7 +2701,18 @@ script_functions:
                     // This group has NO visible layers - shrink all to center
                     foreach ($all_positions as $position) {
                         $video_layer = $position['video'];
+                        $audio_layer = $position['audio'] ?? null;
                         $status = $position['status'];
+
+                        // Check if a_* layer exists
+                        $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
+                        // Volume logic: if a_* exists, av_* always gets volume=0
+                        if ($audio_layer_exists) {
+                            $av_volume = 0.0;
+                        } else {
+                            $av_volume = ($status === 'audio-only') ? 1.0 : 0.0;
+                        }
 
                         setLive($video_layer);
                         setValue($video_layer, [
@@ -2597,8 +2723,14 @@ script_functions:
                                 'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                                 'tvGroup_Appearance__Shape' => 2
                             ],
-                            'volume' => ($status === 'audio-only') ? 1.0 : 0.0
+                            'volume' => $av_volume
                         ]);
+
+                        // Handle audio layer (only if it exists)
+                        if ($audio_layer_exists) {
+                            setLive($audio_layer);
+                            setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+                        }
                     }
                 }
             }
@@ -2613,12 +2745,12 @@ script_functions:
             }
         }
 
-        // Store current exclusive in session at the end (only if one exists)
+        // Store current exclusive in datastore at the end (only if one exists)
         if (count($exclusive_layers) === 1) {
-            $_SESSION[$document_path . '/lastExclusive'] = $exclusive_layers[0];
+            setDatastore($state_path, ['lastExclusive' => $exclusive_layers[0]]);
         } elseif (count($exclusive_layers) === 0) {
-            // No exclusive - clear the session
-            unset($_SESSION[$document_path . '/lastExclusive']);
+            // No exclusive - clear the datastore
+            deleteDatastore($state_path);
         }
 
     }
@@ -2636,12 +2768,27 @@ script_functions:
             foreach ($all_positions as $position) {
                 $video_layer = $position['video'];
                 $audio_layer = $position['audio'] ?? null;
-                $tracking_layer = $position['tracking'] ?? null;
                 $status = $position['status'];
 
+                // Check if a_* layer exists
+                $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
                 if ($status === 'video-and-audio' || $status === 'video-no-audio') {
+                    // Border color: only use highlight if a_* layer exists
+                    if ($audio_layer_exists) {
+                        $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
+                    } else {
+                        $border_color = $color_default;
+                    }
+
+                    // Volume logic: if a_* exists, av_* always gets volume=0
+                    if ($audio_layer_exists) {
+                        $video_volume = 0.0;
+                    } else {
+                        $video_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
+                    }
+
                     // The ONE visible layer takes full group area
-                    $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
                     setLive($video_layer);
                     setValue($video_layer, [
                         'input-values' => [
@@ -2651,15 +2798,22 @@ script_functions:
                             'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                             'tvGroup_Appearance__Shape' => 2
                         ],
-                        'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+                        'volume' => $video_volume
                     ]);
 
-                    // Handle optional audio layer
-                    if ($audio_layer) {
+                    // Handle audio layer (only if it exists)
+                    if ($audio_layer_exists) {
                         setLive($audio_layer);
                         setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
                     }
                 } else {
+                    // Volume logic for non-visible: if a_* exists, av_* always gets volume=0
+                    if ($audio_layer_exists) {
+                        $video_volume = 0.0;
+                    } else {
+                        $video_volume = ($status === 'audio-only') ? 1.0 : 0.0;
+                    }
+
                     // Non-visible: shrink to center of group
                     setLive($video_layer);
                     setValue($video_layer, [
@@ -2670,11 +2824,11 @@ script_functions:
                             'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                             'tvGroup_Appearance__Shape' => 2
                         ],
-                        'volume' => ($status === 'audio-only') ? 1.0 : 0.0
+                        'volume' => $video_volume
                     ]);
 
-                    // Handle optional audio layer
-                    if ($audio_layer) {
+                    // Handle audio layer (only if it exists)
+                    if ($audio_layer_exists) {
                         setLive($audio_layer);
                         setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
                     }
@@ -2726,10 +2880,25 @@ script_functions:
 
             $video_layer = $position['video'];
             $audio_layer = $position['audio'] ?? null;
-            $tracking_layer = $position['tracking'] ?? null;
             $status = $position['status'];
 
-            $border_color = getAudioHighlightColor($tracking_layer, $color_default, $color_highlight, $threshold);
+            // Check if a_* layer exists
+            $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
+            // Border color: only use highlight if a_* layer exists
+            if ($audio_layer_exists) {
+                $border_color = getAudioHighlightColor($audio_layer, $color_default, $color_highlight, $threshold) ?? $color_default;
+            } else {
+                $border_color = $color_default;
+            }
+
+            // Volume logic: if a_* exists, av_* always gets volume=0
+            if ($audio_layer_exists) {
+                $video_volume = 0.0;
+            } else {
+                $video_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
+            }
+
             setLive($video_layer);
             setValue($video_layer, [
                 'input-values' => [
@@ -2739,11 +2908,11 @@ script_functions:
                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => $corner_radius,
                     'tvGroup_Appearance__Shape' => 2
                 ],
-                'volume' => ($status === 'video-and-audio') ? 1.0 : 0.0
+                'volume' => $video_volume
             ]);
 
-            // Handle optional audio layer
-            if ($audio_layer) {
+            // Handle audio layer (only if it exists)
+            if ($audio_layer_exists) {
                 setLive($audio_layer);
                 setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
             }
@@ -2778,6 +2947,16 @@ script_functions:
             $video_layer = $position['video'];
             $audio_layer = $position['audio'] ?? null;
 
+            // Check if a_* layer exists
+            $audio_layer_exists = ($audio_layer !== null && namedAPI_get($audio_layer . '/id') !== null);
+
+            // Volume logic: if a_* exists, av_* always gets volume=0
+            if ($audio_layer_exists) {
+                $video_volume = 0.0;
+            } else {
+                $video_volume = ($status === 'audio-only') ? 1.0 : 0.0;
+            }
+
             setLive($video_layer);
             setValue($video_layer, [
                 'input-values' => [
@@ -2787,11 +2966,11 @@ script_functions:
                     'tvGroup_Appearance__Corner_Radius_TypeBoinxY' => 0,
                     'tvGroup_Appearance__Shape' => 2
                 ],
-                'volume' => ($status === 'audio-only') ? 1.0 : 0.0
+                'volume' => $video_volume
             ]);
 
-            // Handle optional audio layer
-            if ($audio_layer) {
+            // Handle audio layer (only if it exists)
+            if ($audio_layer_exists) {
                 setLive($audio_layer);
                 setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
             }
