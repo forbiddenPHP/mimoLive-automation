@@ -708,6 +708,31 @@ These functions are available but are typically used internally:
 
   The example document `autoGridTest.tvShow` demonstrates this setup with a complete Control Surface configuration.
 
+- **`setPIPWindowLayerAppearance($layer, $w, $h, $y, $x, $doc_path, $border_color, $border_width, $corner_radius, $volume)`** - Set all appearance properties for a PIP Window (Video Placer) layer in one call
+
+  Combines position, border styling and volume into a single setValue() call. Useful for custom video layouts outside of setAutoGrid().
+
+  **Parameters:**
+  - `$layer`: Full namedAPI path to the video layer (e.g., `$base.'/layers/av_pos_1_group_1'`)
+  - `$w`, `$h`: Width and height in pixels
+  - `$y`, `$x`: Top and left position in pixels
+  - `$doc_path`: Document path (for coordinate conversion)
+  - `$border_color`: Border color as hex string (e.g., `'#FFFFFFFF'`)
+  - `$border_width`: Border width (use 0 for no border)
+  - `$corner_radius`: Corner radius (use 0 for sharp corners)
+  - `$volume`: Audio volume (0.0 to 1.0)
+
+  ```php
+  $base = 'hosts/master/documents/MyShow';
+  $layer = $base.'/layers/av_pos_1_group_1';
+
+  // Position layer at 100,50 with size 800x450, white border, full volume
+  setPIPWindowLayerAppearance($layer, 800, 450, 50, 100, $base, '#FFFFFFFF', 2, 10, 1.0);
+
+  // Shrink layer to center point (size 0), no border, muted
+  setPIPWindowLayerAppearance($layer, 0, 0, 540, 960, $base, '#FFFFFFFF', 0, 0, 0.0);
+  ```
+
 - **`wait($seconds)`** - Pause execution without processing frames (internal use)
   ```php
   wait(1.0); // Wait 1 second, no frame processing
