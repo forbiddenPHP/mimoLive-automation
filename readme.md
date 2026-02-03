@@ -318,6 +318,83 @@ mimoLive allows storing persistent data inside the document file. These function
   ```
   *Returns `true` on success, `false` if store didn't exist.*
 
+#### Zoom Integration (BETA)
+
+> ⚠️ **BETA**: These functions are partially implemented and need further testing. API parameters and behavior may change.
+
+Control Zoom meetings directly from mimoLive. Requires a mimoLive Studio license.
+
+- **`zoomJoin($host_path, $meetingid = null, $passcode = null, $options = [])`** - Join a Zoom meeting
+  ```php
+  // Join with meeting ID and passcode
+  zoomJoin('hosts/master', '123456789', 'secret123');
+
+  // Join with options (display name, virtual camera)
+  zoomJoin('hosts/master', '123456789', 'secret123', [
+      'displayname' => 'mimoLive Studio',
+      'virtualcamera' => true  // Send program output back to Zoom
+  ]);
+
+  // Re-join with stored credentials (from previous call)
+  zoomJoin('hosts/master');
+  ```
+  *Credentials are stored in the document's datastore and reused if not provided. Skips the join if already in meeting with same credentials.*
+
+- **`zoomLeave($host_path)`** - Leave the current meeting
+  ```php
+  zoomLeave('hosts/master');
+  ```
+
+- **`zoomEnd($host_path)`** - End the meeting (host only)
+  ```php
+  zoomEnd('hosts/master');
+  ```
+
+- **`zoomParticipants($host_path)`** - Get list of participants
+  ```php
+  $participants = zoomParticipants('hosts/master');
+  // Returns array with participant data
+  ```
+
+- **`zoomMeetingAction($host_path, $command)`** - Execute meeting actions
+  ```php
+  zoomMeetingAction('hosts/master', 'muteAll');
+  zoomMeetingAction('hosts/master', 'lockMeeting');
+  zoomMeetingAction('hosts/master', 'lowerAllHands');
+  ```
+  *Available commands:*
+  - `requestRecordingPermission`
+  - `muteVideo`, `unmuteVideo`
+  - `muteAudio`, `unmuteAudio`
+  - `enableUnmuteBySelf`, `disableUnmuteBySelf`
+  - `muteAll`, `unmuteAll`
+  - `lockMeeting`, `unlockMeeting`
+  - `lowerAllHands`
+  - `shareFitWindowMode`, `shareOriginSizeMode`
+  - `pauseShare`, `resumeShare`
+  - `joinVoip`, `leaveVoip`
+  - `allowParticipantsToChat`, `disallowParticipantsToChat`
+  - `allowParticipantsToShare`, `disallowParticipantsToShare`
+  - `allowParticipantsToStartVideo`, `disallowParticipantsToStartVideo`
+  - `allowParticipantsToShareWhiteBoard`, `disallowParticipantsToShareWhiteBoard`
+  - `enableAutoAllowLocalRecordingRequest`, `disableAutoAllowLocalRecordingRequest`
+  - `allowParticipantsToRename`, `disallowParticipantsToRename`
+  - `showParticipantProfilePictures`, `hideParticipantProfilePictures`
+
+**namedAPI Data:**
+
+When `zoom` is detected in your script, participant data is loaded into the namedAPI:
+```php
+// Check participant count (0 = no meeting)
+$count = namedAPI_get('hosts/master/zoom/participants-count');
+
+// Get participant details by name
+$is_host = namedAPI_get('hosts/master/zoom/participants/Anika Patel/isHost');
+$is_talking = namedAPI_get('hosts/master/zoom/participants/Anika Patel/isTalking');
+```
+
+*Available participant fields: id, isHost, isCoHost, isVideoOn, isAudioOn, isTalking, isRaisingHand, userRole*
+
 #### Property Updates
 
 - **`setValue($namedAPI_path, $updates_array)`** - Update properties of documents, layers, variants, sources, filters, or outputs
