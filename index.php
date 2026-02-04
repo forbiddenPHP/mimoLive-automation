@@ -42,6 +42,155 @@ functions:
         }
     }
 
+       /**
+     * Get data from a datastore (synchronous - not queued)
+     *
+     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
+     * @param string|null $keypath Optional keypath to get specific value (e.g., 'input-values/score')
+     * @param string $separator Separator for keypath (default: '/')
+     * @return mixed The data, or null if not found
+     */
+    function getDatastore($path, $keypath = null, $separator = '/') {
+        $path = trim($path, '/');
+
+        $url_data = build_api_url($path);
+        if ($url_data === null) {
+            debug_print('datastores', "getDatastore() ERROR: Invalid path '$path'\n");
+            return null;
+        }
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        // curl_close($ch); // deprecated since PHP 8.0
+
+        debug_print('datastores', "getDatastore() GET $path → HTTP $http_code\n");
+
+        if ($http_code === 404) {
+            return null;
+        }
+
+        if ($http_code !== 200 || $response === false) {
+            debug_print('datastores', "getDatastore() ERROR: HTTP $http_code\n");
+            return null;
+        }
+
+        $data = json_decode($response, true);
+        if ($data === null) {
+            // Not JSON - return raw response
+            $data = $response;
+        }
+
+        // If keypath specified, extract that part
+        if ($keypath !== null && is_array($data)) {
+            return array_get($data, $keypath, delim: $separator);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Set data in a datastore (synchronous - not queued)
+     * Deep-merges with existing data by default
+     *
+     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
+     * @param mixed $data Data to store
+     * @param bool $replace If true, replace entire store instead of merging
+     * @return bool Success
+     */
+    function setDatastore($path, $data, $replace = false) {
+        $path = trim($path, '/');
+
+        $url_data = build_api_url($path);
+        if ($url_data === null) {
+            debug_print('datastores', "setDatastore() ERROR: Invalid path '$path'\n");
+            return false;
+        }
+
+        // If not replacing, merge with existing data
+        if (!$replace && is_array($data)) {
+            $existing = getDatastore($path);
+            if (is_array($existing)) {
+                // Deep merge: flatten both, merge, reconstruct
+                $flat_existing = array_flat($existing);
+                $flat_new = array_flat($data);
+                $flat_merged = array_merge($flat_existing, $flat_new);
+
+                $data = [];
+                foreach ($flat_merged as $keypath => $value) {
+                    array_set($data, $keypath, $value);
+                }
+            }
+        }
+
+        // Convert to JSON if array
+        $body = is_array($data) ? json_encode($data) : $data;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+
+        $headers = ['Content-Type: application/json'];
+        if (strlen($url_data['pwd']) > 0) {
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        // curl_close($ch); // deprecated since PHP 8.0
+
+        debug_print('datastores', "setDatastore() PUT $path → HTTP $http_code\n");
+
+        return $http_code === 200;
+    }
+
+    /**
+     * Delete a datastore (synchronous - not queued)
+     *
+     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
+     * @return bool Success
+     */
+    function deleteDatastore($path) {
+        $path = trim($path, '/');
+
+        $url_data = build_api_url($path);
+        if ($url_data === null) {
+            debug_print('datastores', "deleteDatastore() ERROR: Invalid path '$path'\n");
+            return false;
+        }
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+
+        if (strlen($url_data['pwd']) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        // curl_close($ch); // deprecated since PHP 8.0
+
+        debug_print('datastores', "deleteDatastore() DELETE $path → HTTP $http_code\n");
+
+        return $http_code === 200;
+    }
+
+
     function build_namedAPI() {
             global $configuration, $namedAPI, $load;
 
@@ -499,6 +648,62 @@ functions:
                     'has_presenter' => $has_presenter,
                     'groups' => $groups
                 ]);
+            }
+        }
+    }
+
+    // ===== Load webcontrol data =====
+    foreach ($hosts as $host_name => $host) {
+        $docs = namedAPI_get('hosts/'.$host_name.'/documents');
+        if (!is_array($docs)) continue;
+
+        foreach ($docs as $doc_name => $doc_data) {
+            $datastore_path = 'hosts/'.$host_name.'/documents/'.$doc_name.'/datastores/live.mimo.remote-control.canvases.index';
+            $index_data = getDatastore($datastore_path);
+
+            $canvas_ids = [];
+            if ($index_data !== null && isset($index_data['canvases']) && is_array($index_data['canvases'])) {
+                $canvas_ids = $index_data['canvases'];
+            }
+
+            namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/webcontrol/index', $canvas_ids);
+
+            foreach ($canvas_ids as $canvas_id) {
+                $canvas_datastore_path = 'hosts/'.$host_name.'/documents/'.$doc_name.'/datastores/live.mimo.remote-control.canvases.'.$canvas_id;
+                $canvas_data = getDatastore($canvas_datastore_path);
+
+                if ($canvas_data !== null && isset($canvas_data['canvas'])) {
+                    $canvas_title = $canvas_data['canvas']['title'] ?? $canvas_id;
+                    $canvas_content = $canvas_data['canvas'];
+
+                    // Reorganize buttons to be named instead of indexed
+                    if (isset($canvas_content['buttons']) && is_array($canvas_content['buttons'])) {
+                        $named_buttons = [];
+                        $button_counter = 0;
+                        foreach ($canvas_content['buttons'] as $button) {
+                            $button_name = $button['text'] ?? '';
+                            if (!empty($button['subtext'])) {
+                                $button_name .= ' ' . $button['subtext'];
+                            }
+                            $button_name = trim($button_name);
+                            if (empty($button_name)) {
+                                debug_print('webcontrol', "Button without name in canvas '$canvas_title' - using fallback\n");
+                                $button_name = $button['icon'] ?? ('button' . ($button_counter > 0 ? ' ' . $button_counter : ''));
+                            }
+
+                            // Check for duplicates
+                            if (isset($named_buttons[$button_name])) {
+                                debug_print('webcontrol', "Duplicate button name '$button_name' in canvas '$canvas_title'\n");
+                            }
+
+                            $named_buttons[$button_name] = $button;
+                            $button_counter++;
+                        }
+                        $canvas_content['buttons'] = $named_buttons;
+                    }
+
+                    namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/webcontrol/'.$canvas_title, $canvas_content);
+                }
             }
         }
     }
@@ -1042,7 +1247,7 @@ check_list:
         if (strlen($filter) > 0) {
             $filtered = [];
             // Split filter by spaces - all parts must match
-            $filter_parts = preg_split('/\s+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
+            $filter_parts = preg_split('/;+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
             foreach ($flat as $path => $value) {
                 $all_match = true;
                 foreach ($filter_parts as $part) {
@@ -2032,154 +2237,6 @@ script_functions:
         debug_print('zoom', "zoomMeetingAction() response: HTTP $http_code\n");
 
         return $http_code >= 200 && $http_code < 300;
-    }
-
-    /**
-     * Get data from a datastore (synchronous - not queued)
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @param string|null $keypath Optional keypath to get specific value (e.g., 'input-values/score')
-     * @param string $separator Separator for keypath (default: '/')
-     * @return mixed The data, or null if not found
-     */
-    function getDatastore($path, $keypath = null, $separator = '/') {
-        $path = trim($path, '/');
-
-        $url_data = build_api_url($path);
-        if ($url_data === null) {
-            debug_print('datastores', "getDatastore() ERROR: Invalid path '$path'\n");
-            return null;
-        }
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-
-        if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
-        }
-
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
-
-        debug_print('datastores', "getDatastore() GET $path → HTTP $http_code\n");
-
-        if ($http_code === 404) {
-            return null;
-        }
-
-        if ($http_code !== 200 || $response === false) {
-            debug_print('datastores', "getDatastore() ERROR: HTTP $http_code\n");
-            return null;
-        }
-
-        $data = json_decode($response, true);
-        if ($data === null) {
-            // Not JSON - return raw response
-            $data = $response;
-        }
-
-        // If keypath specified, extract that part
-        if ($keypath !== null && is_array($data)) {
-            return array_get($data, $keypath, delim: $separator);
-        }
-
-        return $data;
-    }
-
-    /**
-     * Set data in a datastore (synchronous - not queued)
-     * Deep-merges with existing data by default
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @param mixed $data Data to store
-     * @param bool $replace If true, replace entire store instead of merging
-     * @return bool Success
-     */
-    function setDatastore($path, $data, $replace = false) {
-        $path = trim($path, '/');
-
-        $url_data = build_api_url($path);
-        if ($url_data === null) {
-            debug_print('datastores', "setDatastore() ERROR: Invalid path '$path'\n");
-            return false;
-        }
-
-        // If not replacing, merge with existing data
-        if (!$replace && is_array($data)) {
-            $existing = getDatastore($path);
-            if (is_array($existing)) {
-                // Deep merge: flatten both, merge, reconstruct
-                $flat_existing = array_flat($existing);
-                $flat_new = array_flat($data);
-                $flat_merged = array_merge($flat_existing, $flat_new);
-
-                $data = [];
-                foreach ($flat_merged as $keypath => $value) {
-                    array_set($data, $keypath, $value);
-                }
-            }
-        }
-
-        // Convert to JSON if array
-        $body = is_array($data) ? json_encode($data) : $data;
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-
-        $headers = ['Content-Type: application/json'];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
-
-        debug_print('datastores', "setDatastore() PUT $path → HTTP $http_code\n");
-
-        return $http_code === 200;
-    }
-
-    /**
-     * Delete a datastore (synchronous - not queued)
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @return bool Success
-     */
-    function deleteDatastore($path) {
-        $path = trim($path, '/');
-
-        $url_data = build_api_url($path);
-        if ($url_data === null) {
-            debug_print('datastores', "deleteDatastore() ERROR: Invalid path '$path'\n");
-            return false;
-        }
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
-
-        if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
-        }
-
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
-
-        debug_print('datastores', "deleteDatastore() DELETE $path → HTTP $http_code\n");
-
-        return $http_code === 200;
     }
 
     function setVolume($namedAPI_path, $value) {
@@ -3746,7 +3803,9 @@ script_functions:
     }
 
 execute_user_script:
-    eval($script);
+    if (isset($script)) {
+        eval($script);
+    }
 
     if ($background_mode===false) {
         echo json_encode($OUTPUT, JSON_PRETTY_PRINT);
