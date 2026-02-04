@@ -1244,6 +1244,11 @@ check_count:
         $flat = array_flat($namedAPI);
         $filter = $_GET['count'];
 
+        // Default filter if empty
+        if (strlen(trim($filter)) === 0) {
+            $filter = 'master;/type';
+        }
+
         // Extract field name from last filter part
         $filter_parts = preg_split('/;+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
         $field_name = end($filter_parts);
@@ -1294,7 +1299,18 @@ check_count:
                 $grouped[$group] = [];
             }
 
-            $value_str = is_array($value) ? json_encode($value) : (string)$value;
+            // Convert value to string, handling booleans and null
+            if ($value === true) {
+                $value_str = 'true';
+            } elseif ($value === false) {
+                $value_str = 'false';
+            } elseif ($value === null) {
+                $value_str = 'null';
+            } elseif (is_array($value)) {
+                $value_str = json_encode($value);
+            } else {
+                $value_str = (string)$value;
+            }
             if (!isset($grouped[$group][$value_str])) {
                 $grouped[$group][$value_str] = 0;
             }
