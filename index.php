@@ -1627,18 +1627,105 @@ script_functions:
         queue_action($current_frame, $namedAPI_path, '', $updates_array);
     }
 
-    /**
-     * Push a comment to mimoLive's comment system
-     *
-     * @param string $path The host path: "hosts/master/comments/new" or "hosts/master"
-     * @param array $comment_data Comment data with keys:
-     *   - username (required): Display name of commenter
-     *   - comment (required): The comment text
-     *   - userimageurl (optional): URL to user's avatar image
-     *   - date (optional): ISO8601 date string, defaults to now
-     *   - platform (optional): facebook|twitter|youtube|twitch
-     *   - favorite (optional): boolean, mark as favorite
-     */
+
+    function cleanMessage(string $message): string
+    {
+        // Remove non-printable Unicode characters (control, format, surrogates,
+        // private use, unassigned) but keep \t \n \r for the next step
+        $message = preg_replace('/(?![\t\n\r])\p{C}/u', '', $message);
+
+        // Flatten all whitespace variants to plain spaces
+        $message = str_replace(["\r\n", "\r", "\n", "\t"], ' ', $message);
+
+        // Collapse runs of spaces
+        $message = preg_replace('/ {2,}/', ' ', $message);
+
+        return trim($message);
+    }
+
+    function keepMessage(string $message): bool
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        // --- Step 1: Emojis → always keep ---
+
+        if (preg_match('/[\x{1F600}-\x{1F64F}'   // Emoticons
+            . '\x{1F300}-\x{1F5FF}'               // Misc Symbols & Pictographs
+            . '\x{1F680}-\x{1F6FF}'               // Transport & Map Symbols
+            . '\x{1F900}-\x{1F9FF}'               // Supplemental Symbols
+            . '\x{1FA00}-\x{1FA6F}'               // Chess, extended
+            . '\x{1FA70}-\x{1FAFF}'               // Extended-A
+            . '\x{FE00}-\x{FE0F}'                 // Variation Selectors
+            . '\x{200D}'                           // Zero Width Joiner
+            . '\x{1F1E0}-\x{1F1FF}]/u',           // Regional Indicator (flags)
+            $trimmed))
+        {
+            return true;
+        }
+
+        // --- Step 2: No letters or numbers → discard ---
+
+        if (!preg_match('/[\p{L}\p{N}]/u', $trimmed)) {
+            return false;
+        }
+
+        // --- Step 3: Calculate ASCII-art ratio ---
+
+        // Strip spaces and split into individual characters
+        $clean = preg_replace('/\s+/u', '', $trimmed);
+        $chars = mb_str_split($clean);
+        $total = count($chars);
+
+        // Very short messages skip the art check (e.g. "ok", "F", "gg")
+        if ($total < 4) {
+            return true;
+        }
+
+        // Unicode blocks commonly used for ASCII art:
+        //   U+2190–21FF  Arrows
+        //   U+2200–22FF  Mathematical Operators
+        //   U+2300–23FF  Miscellaneous Technical
+        //   U+2500–257F  Box Drawing
+        //   U+2580–259F  Block Elements
+        //   U+25A0–25FF  Geometric Shapes
+        //   U+2600–26FF  Miscellaneous Symbols
+        //   U+2700–27BF  Dingbats
+        //   U+2800–28FF  Braille Patterns
+        //
+        // Plus common ASCII structural characters:
+        //   | \ / _ ~ ` ^ = + - < > # * @ $ % & § ° • ·
+        //   ( ) { } [ ] ! ? . : ; , " '
+
+        $artPattern = '/[\x{2190}-\x{21FF}'
+            . '\x{2200}-\x{22FF}'
+            . '\x{2300}-\x{23FF}'
+            . '\x{2500}-\x{257F}'
+            . '\x{2580}-\x{259F}'
+            . '\x{25A0}-\x{25FF}'
+            . '\x{2600}-\x{26FF}'
+            . '\x{2700}-\x{27BF}'
+            . '\x{2800}-\x{28FF}'
+            . '|\\\\\\/_~`^=+\\-<>#*@$%&§°•·'
+            . '(){}\\[\\]!?.:;,"\x{27}]/u';
+
+        $artCount = 0;
+        foreach ($chars as $ch) {
+            if (preg_match($artPattern, $ch) && !preg_match('/[\p{L}\p{N}]/u', $ch)) {
+                $artCount++;
+            }
+        }
+
+        // If more than 70% of characters are art characters → discard
+        if (($artCount / $total) > 0.7) {
+            return false;
+        }
+
+        return true;
+    }
+
     function pushComment($path, $comment_data) {
         global $current_frame;
 
@@ -1647,6 +1734,15 @@ script_functions:
             debug_print('comments', "pushComment() ERROR: username and comment are required\n");
             return;
         }
+
+        // Check if message should be kept
+        if (!keepMessage($comment_data['comment'])) {
+            debug_print('comments', "pushComment() SKIPPED: message filtered by keepMessage()\n");
+            return;
+        }
+
+        // Clean the message
+        $comment_data['comment'] = cleanMessage($comment_data['comment']);
 
         // Normalize path
         $path = trim($path, '/');
