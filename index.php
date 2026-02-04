@@ -1142,8 +1142,8 @@ determine_load_sections:
         'zoom' => false,
     ];
 
-    // If ?list is set, load everything
-    if (isset($_GET['list']) || isset($_GET['translate'])) {
+    // If ?list, ?count, or ?translate is set, load everything
+    if (isset($_GET['list']) || isset($_GET['count']) || isset($_GET['translate'])) {
         foreach ($load as $key => $value) {
             $load[$key] = true;
         }
@@ -1238,6 +1238,87 @@ check_translate:
         goto input_done;
     }
 
+check_count:
+    if (isset($_GET['count'])) {
+        global $namedAPI, $OUTPUT;
+        $flat = array_flat($namedAPI);
+        $filter = $_GET['count'];
+
+        // Extract field name from last filter part
+        $filter_parts = preg_split('/;+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
+        $field_name = end($filter_parts);
+        $field_name = ltrim($field_name, '/');
+
+        // Filter data like in ?list
+        $filtered = [];
+        if (strlen($filter) > 0) {
+            foreach ($flat as $path => $value) {
+                $position = 0;
+                $all_match = true;
+                foreach ($filter_parts as $part) {
+                    $found_pos = stripos($path, $part, $position);
+                    if ($found_pos === false) {
+                        $all_match = false;
+                        break;
+                    }
+                    $position = $found_pos + strlen($part);
+                }
+                if ($all_match) {
+                    $filtered[$path] = $value;
+                }
+            }
+        } else {
+            $filtered = $flat;
+        }
+
+        // Group by pattern and count values
+        $grouped = [];
+        foreach ($filtered as $path => $value) {
+            // Pattern matching for grouping (same as bash script)
+            $group = 'Other';
+
+            if (stripos($path, '/zoom/') !== false) $group = 'Zoom';
+            elseif (stripos($path, '/webcontrol/') !== false) $group = 'Webcontrol';
+            elseif (stripos($path, '/filters/') !== false) $group = 'Filters';
+            elseif (stripos($path, '/variants/') !== false) $group = 'Variants';
+            elseif (stripos($path, '/layers/') !== false) $group = 'Layers';
+            elseif (stripos($path, '/sources/') !== false) $group = 'Sources';
+            elseif (stripos($path, '/output-destinations/') !== false) $group = 'Output-Destinations';
+            elseif (stripos($path, '/outputs/') !== false) $group = 'Outputs';
+            elseif (stripos($path, '/layer-sets/') !== false) $group = 'Layer-Sets';
+            elseif (stripos($path, '/devices/') !== false) $group = 'Devices';
+            elseif (stripos($path, '/documents/') !== false) $group = 'Documents';
+            elseif (stripos($path, '/hosts/') !== false) $group = 'Hosts';
+
+            if (!isset($grouped[$group])) {
+                $grouped[$group] = [];
+            }
+
+            $value_str = is_array($value) ? json_encode($value) : (string)$value;
+            if (!isset($grouped[$group][$value_str])) {
+                $grouped[$group][$value_str] = 0;
+            }
+            $grouped[$group][$value_str]++;
+        }
+
+        // Build output array
+        $result = [];
+        ksort($grouped);
+        foreach ($grouped as $group => $values) {
+            $result[$group] = [];
+            arsort($values);
+            foreach ($values as $value => $count) {
+                $key = $field_name . ': ' . $value;
+                $result[$group][$key] = $count;
+            }
+        }
+
+        $OUTPUT = $result;
+        array_set($OUTPUT, 'code', 200);
+        $everything_is_fine = true;
+        goto input_done;
+    }
+
 check_list:
     if (isset($_GET['list'])) {
         global $namedAPI, $OUTPUT;
@@ -1246,15 +1327,18 @@ check_list:
 
         if (strlen($filter) > 0) {
             $filtered = [];
-            // Split filter by spaces - all parts must match
+            // Split filter by semicolon - all parts must match in order
             $filter_parts = preg_split('/;+/', $filter, -1, PREG_SPLIT_NO_EMPTY);
             foreach ($flat as $path => $value) {
+                $position = 0;
                 $all_match = true;
                 foreach ($filter_parts as $part) {
-                    if (stripos($path, $part) === false) {
+                    $found_pos = stripos($path, $part, $position);
+                    if ($found_pos === false) {
                         $all_match = false;
                         break;
                     }
+                    $position = $found_pos + strlen($part);
                 }
                 if ($all_match) {
                     $filtered[$path] = $value;

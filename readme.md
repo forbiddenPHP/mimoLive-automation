@@ -950,12 +950,78 @@ The `?list` endpoint provides introspection into the current namedAPI state, mak
 
   # Find specific layer data
   curl http://localhost:8888/?list=layers/Comments | jq
+
+  # Filter by multiple terms (semicolon-separated, all must match)
+  curl http://localhost:8888/?list=layers;live-state | jq
+  curl http://localhost:8888/?list=hosts;master;layers | jq
   ```
 
 **Use cases:**
 - Discover all the available pathes (for copy and paste?)
 - Find the exact keypath for a specific resource
 - Monitor API state during development
+
+### Count and Analyze API Values
+
+The `?count` endpoint aggregates and counts values across the API, grouped by resource type. Perfect for analyzing what's available in your system.
+
+- **`/?count=filter`** - Counts occurrences of values matching the filter, grouped by pattern
+  ```zsh
+  # Analyze all types in the system
+  curl http://localhost:8888/?count=master;/type | jq
+
+  # Count live-states across resources
+  curl http://localhost:8888/?count=master;live-state | jq
+
+  # Analyze source types available
+  curl http://localhost:8888/?count=sources;/source-type | jq
+
+  # Check device types
+  curl http://localhost:8888/?count=devices;/device-type | jq
+  ```
+
+**Example output:**
+```json
+{
+  "Layers": {
+    "type: number": 151,
+    "type: index": 52,
+    "type: color": 42,
+    "type: string": 31
+  },
+  "Sources": {
+    "source-type: com.boinx.mimoLive.sources.deviceVideoSource": 3,
+    "source-type: com.boinx.boinxtv.source.placeholder": 1,
+    "source-type: com.boinx.mimoLive.sources.zoomparticipant": 1
+  },
+  "Webcontrol": {
+    "type: setLive": 2,
+    "type: toggleLive": 2,
+    "type: setOff": 1
+  }
+}
+```
+
+**Grouping patterns:**
+Values are automatically grouped by their location in the API hierarchy:
+- `Zoom` - Zoom participant data
+- `Webcontrol` - Remote control canvases
+- `Filters` - Source filters
+- `Variants` - Layer variants
+- `Layers` - Layer resources
+- `Sources` - Source resources
+- `Output-Destinations` - Hardware outputs
+- `Outputs` - Streaming/recording outputs
+- `Layer-Sets` - Layer sets
+- `Devices` - Video/audio devices
+- `Documents` - Document-level data
+- `Hosts` - Host-level data
+
+**Use cases:**
+- **Feature detection** - Check if specific source types exist before using them
+- **API discovery** - See what types of values are available
+- **System inventory** - Count how many layers, sources, outputs you have
+- **Type analysis** - Understand the data structure and available fields
 
 ### Translate mimoLive API URLs to Keypaths
 
