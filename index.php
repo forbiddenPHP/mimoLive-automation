@@ -37,9 +37,7 @@ api_call_functions:
                 break;
         }
 
-        if (count($headers) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        }
+        if (count($headers) > 0) curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         return $ch;
     }
@@ -88,6 +86,14 @@ api_call_functions:
 
 
 functions:
+    function normalize_path($path) {
+        $path = trim($path, '/');
+        $path = trim($path);
+        $path = trim($path, '/');
+        $path = trim($path);
+        return $path;
+    }
+
     function var_dump_inline($var) {
         ob_start();
         var_dump($var);
@@ -113,7 +119,7 @@ functions:
     }
 
     function getDatastore($path, $keypath = null, $separator = '/') {
-        $path = trim($path, '/');
+        $path = normalize_path($path);
 
         $url_data = build_api_url($path);
         if ($url_data === null) {
@@ -122,9 +128,7 @@ functions:
         }
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url_data['url'], 'GET', null, $headers, 5);
         $response = $result['response'];
@@ -132,9 +136,7 @@ functions:
 
         debug_print('datastores', "getDatastore() GET $path → HTTP $http_code\n");
 
-        if ($http_code === 404) {
-            return null;
-        }
+        if ($http_code === 404) return null;
 
         if ($http_code !== 200 || $response === false) {
             debug_print('datastores', "getDatastore() ERROR: HTTP $http_code\n");
@@ -142,21 +144,17 @@ functions:
         }
 
         $data = json_decode($response, true);
-        if ($data === null) {
-            // Not JSON - return raw response
-            $data = $response;
-        }
+        // Not JSON - return raw response
+        if ($data === null) $data = $response;
 
         // If keypath specified, extract that part
-        if ($keypath !== null && is_array($data)) {
-            return array_get($data, $keypath, delim: $separator);
-        }
+        if ($keypath !== null && is_array($data)) return array_get($data, $keypath, delim: $separator);
 
         return $data;
     }
 
     function setDatastore($path, $data, $replace = false) {
-        $path = trim($path, '/');
+        $path = normalize_path($path);
 
         $url_data = build_api_url($path);
         if ($url_data === null) {
@@ -197,7 +195,7 @@ functions:
     }
 
     function deleteDatastore($path) {
-        $path = trim($path, '/');
+        $path = normalize_path($path);
 
         $url_data = build_api_url($path);
         if ($url_data === null) {
@@ -206,9 +204,7 @@ functions:
         }
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url_data['url'], 'DELETE', null, $headers, 5);
         $http_code = $result['http_code'];
@@ -219,7 +215,7 @@ functions:
     }
 
     function getSubType($path, $awaited = null) {
-        $path = trim($path, '/');
+        $path = normalize_path($path);
         $type_value = null;
 
         // Detect resource type and build appropriate type field path
@@ -254,9 +250,7 @@ functions:
         } elseif (stripos($path, '/layer-sets/') !== false) {
             // Layer-set: check if active field exists
             $active = namedAPI_get($path . '/active');
-            if ($active !== null) {
-                $type_value = 'layer-set';
-            }
+            if ($active !== null) $type_value = 'layer-set';
         } elseif (stripos($path, '/devices/') !== false) {
             // Device
             $type_value = namedAPI_get($path . '/device-type');
@@ -264,12 +258,8 @@ functions:
 
         // If awaited comparison requested, return boolean or null
         if ($awaited !== null) {
-            // If resource doesn't exist, return null
-            if ($type_value === null) {
-                return null;
-            }
-            // Otherwise return boolean comparison
-            return ($type_value == $awaited);
+            if ($type_value === null) return null;  // Resource doesn't exist
+            return ($type_value == $awaited);       // Otherwise return boolean comparison
         }
 
         // Return the type value (string or null)
@@ -403,18 +393,10 @@ functions:
                         $base = $protocol . $host . ':' . $port . '/api/v1/documents/' . $doc_id;
                         $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
 
-                        if ($load['sources'] || $load['filters']) {
-                            $phase2_queue[] = ['url' => $base.'/sources', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources', 'pwd' => $pwd_hash];
-                        }
-                        if ($load['layers'] || $load['variants'] || $load['autoGrid']) {
-                            $phase2_queue[] = ['url' => $base.'/layers', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers', 'pwd' => $pwd_hash];
-                        }
-                        if ($load['layer-sets']) {
-                            $phase2_queue[] = ['url' => $base.'/layer-sets', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets', 'pwd' => $pwd_hash];
-                        }
-                        if ($load['output-destinations']) {
-                            $phase2_queue[] = ['url' => $base.'/output-destinations', 'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations', 'pwd' => $pwd_hash];
-                        }
+                        if ($load['sources'] || $load['filters'])                       $phase2_queue[] = ['url' => $base.'/sources',              'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'sources',              'pwd' => $pwd_hash];
+                        if ($load['layers'] || $load['variants'] || $load['autoGrid'])  $phase2_queue[] = ['url' => $base.'/layers',               'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layers',               'pwd' => $pwd_hash];
+                        if ($load['layer-sets'])                                        $phase2_queue[] = ['url' => $base.'/layer-sets',           'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'layer-sets',           'pwd' => $pwd_hash];
+                        if ($load['output-destinations'])                               $phase2_queue[] = ['url' => $base.'/output-destinations',  'host' => $host_name, 'doc_name' => $doc_name, 'doc_id' => $doc_id, 'type' => 'output-destinations',  'pwd' => $pwd_hash];
                     }
                 }
 
@@ -483,9 +465,7 @@ functions:
                         // Zusätzlich: Asset-Referenz
                         namedAPI_set('hosts/'.$meta['host'].'/assets/'.$name, $id);
 
-                        if ($load['filters']) {
-                            $phase3_queue[] = ['url' => $base.'/sources/'.$id.'/filters', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'source_name' => $name, 'type' => 'filters', 'pwd' => $meta['pwd']];
-                        }
+                        if ($load['filters']) $phase3_queue[] = ['url' => $base.'/sources/'.$id.'/filters', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'source_name' => $name, 'type' => 'filters', 'pwd' => $meta['pwd']];
                     }
                 }
 
@@ -499,9 +479,7 @@ functions:
                         }
 
                         // Store relationships (variants array and active-variant)
-                        if (isset($item['relationships'])) {
-                            namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/relationships', $item['relationships']);
-                        }
+                        if (isset($item['relationships'])) namedAPI_set('hosts/'.$meta['host'].'/documents/'.$meta['doc_name'].'/layers/'.$name.'/relationships', $item['relationships']);
 
                         // AutoGrid: Build structure for s_av_* layers (only if autoGrid is needed)
                         if ($load['autoGrid']) {
@@ -535,9 +513,7 @@ functions:
                         }
 
                         // Load variants for all layers (only if needed)
-                        if ($load['variants'] || $load['autoGrid']) {
-                            $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
-                        }
+                        if ($load['variants'] || $load['autoGrid']) $phase3_queue[] = ['url' => $base.'/layers/'.$id.'/variants', 'host' => $meta['host'], 'doc_name' => $meta['doc_name'], 'layer_name' => $name, 'type' => 'variants', 'pwd' => $meta['pwd']];
                     }
                 }
 
@@ -619,9 +595,7 @@ functions:
                         }
 
                         // Track which variant is live (for autoGrid status)
-                        if (($item['attributes']['live-state'] ?? null) === 'live') {
-                            $active_variant = $name;
-                        }
+                        if (($item['attributes']['live-state'] ?? null) === 'live') $active_variant = $name;
                     }
 
                     // If this is an s_av_* layer, update autoGrid with status (only if autoGrid is needed)
@@ -807,8 +781,8 @@ functions:
             $current = $value;
         }
     }
-    function namedAPI_get($keypath, $delim='/', $default=null) { global $namedAPI; return array_get($namedAPI, $keypath, $delim, $default); }
-    function namedAPI_set($keypath, $value, $delim='/') { global $namedAPI; array_set($namedAPI, $keypath, $value, $delim); }
+    function namedAPI_get($keypath, $delim='/', $default=null)  { global $namedAPI; return array_get($namedAPI, $keypath, $delim, $default); }
+    function namedAPI_set($keypath, $value, $delim='/')         { global $namedAPI; array_set($namedAPI, $keypath, $value, $delim); }
 
     function array_flat($array, $prefix='', $delim='/') {
         $result = [];
@@ -826,7 +800,8 @@ functions:
     function build_api_url($namedAPI_path) {
         global $configuration;
 
-        $parts = explode('/', trim($namedAPI_path, '/'));
+        // Path is already normalized by callers - no slashes at start/end
+        $parts = explode('/', $namedAPI_path);
 
         if (count($parts) < 3 || $parts[0] !== 'hosts') {
             return null;
@@ -1592,7 +1567,7 @@ script_functions:
     }
 
     function isLive($namedAPI_path) {
-        $namedAPI_path = trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
 
         // Detect if this is a layer-set (uses 'active' field instead of 'live-state')
         if (str_contains($namedAPI_path, '/layer-sets/')) {
@@ -1930,9 +1905,7 @@ script_functions:
     }
 
     function openWebBrowser($namedAPI_path) {
-        $namedAPI_path=trim($namedAPI_path, '/');
-        $namedAPI_path=trim($namedAPI_path);
-        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
         global $current_frame;
         debug_print($namedAPI_path, "openWebBrowser() called: path=$namedAPI_path\n");
 
@@ -1958,9 +1931,7 @@ script_functions:
     }
 
     function setValue($namedAPI_path, $updates_array) {
-        $namedAPI_path=trim($namedAPI_path, '/');
-        $namedAPI_path=trim($namedAPI_path);
-        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
         global $current_frame;
         debug_print($namedAPI_path, "setValue() called: path=$namedAPI_path\n");
         $url = build_api_url($namedAPI_path);
@@ -2090,7 +2061,7 @@ script_functions:
         $comment_data['comment'] = cleanMessage($comment_data['comment']);
 
         // Normalize path
-        $path = trim($path, '/');
+        $path = normalize_path($path);
 
         // Accept "hosts/XXX/comments/new" or "hosts/XXX" - normalize to full path
         if (preg_match('#^hosts/([^/]+)$#', $path, $matches)) {
@@ -2118,7 +2089,7 @@ script_functions:
     function _buildZoomUrl($host_path, $endpoint) {
         global $configuration;
 
-        $path = trim($host_path, '/');
+        $path = normalize_path($host_path);
         $parts = explode('/', $path);
 
         // Accept "hosts/XXX" format
@@ -2145,7 +2116,7 @@ script_functions:
     function _getZoomDatastorePath($host_path) {
         // We need a document path for the datastore
         // Use the first available document for this host
-        $path = trim($host_path, '/');
+        $path = normalize_path($host_path);
         $parts = explode('/', $path);
         $host_name = $parts[1] ?? 'master';
 
@@ -2186,7 +2157,7 @@ script_functions:
                          && ($stored['passcode'] ?? null) === $passcode;
 
         // Check if we're already in a meeting via namedAPI
-        $host_path_clean = trim($host_path, '/');
+        $host_path_clean = normalize_path($host_path);
         $participant_count = namedAPI_get($host_path_clean . '/zoom/participants-count');
 
         if ($participant_count !== null && $participant_count > 0 && $same_credentials) {
@@ -2225,9 +2196,7 @@ script_functions:
         debug_print('zoom', "zoomJoin() called: url=$url\n");
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url, 'GET', null, $headers, 10);
         $http_code = $result['http_code'];
@@ -2244,9 +2213,7 @@ script_functions:
         debug_print('zoom', "zoomLeave() called: url={$url_data['url']}\n");
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
         $http_code = $result['http_code'];
@@ -2263,9 +2230,7 @@ script_functions:
         debug_print('zoom', "zoomEnd() called: url={$url_data['url']}\n");
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
         $http_code = $result['http_code'];
@@ -2282,9 +2247,7 @@ script_functions:
         debug_print('zoom', "zoomParticipants() called: url={$url_data['url']}\n");
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
         $response = $result['response'];
@@ -2317,9 +2280,7 @@ script_functions:
         debug_print('zoom', "zoomMeetingAction() called: url=$url\n");
 
         $headers = [];
-        if (strlen($url_data['pwd']) > 0) {
-            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
-        }
+        if (strlen($url_data['pwd']) > 0) $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
 
         $result = single_curl($url, 'GET', null, $headers, 10);
         $http_code = $result['http_code'];
@@ -2330,9 +2291,7 @@ script_functions:
     }
 
     function setVolume($namedAPI_path, $value) {
-        $namedAPI_path=trim($namedAPI_path, '/');
-        $namedAPI_path=trim($namedAPI_path);
-        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
 
         $parts = explode('/', $namedAPI_path);
 
@@ -2369,9 +2328,7 @@ script_functions:
     }
 
     function setAnimateVolume($namedAPI_path, $target_value, $steps=null, $fps=null) {
-        $namedAPI_path=trim($namedAPI_path, '/');
-        $namedAPI_path=trim($namedAPI_path);
-        $namedAPI_path=trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
         global $current_frame, $configuration;
 
         // Get default framerate from configuration
@@ -2430,9 +2387,7 @@ script_functions:
     }
 
     function setAnimateValue($namedAPI_path, $updates_array, $steps=null, $fps=null) {
-        $namedAPI_path = trim($namedAPI_path, '/');
-        $namedAPI_path = trim($namedAPI_path);
-        $namedAPI_path = trim($namedAPI_path, '/');
+        $namedAPI_path = normalize_path($namedAPI_path);
         global $current_frame, $configuration;
 
         debug_print($namedAPI_path, "setAnimateValue() called: path=$namedAPI_path, updates=" . json_encode($updates_array) . ", steps=$steps, fps=$fps\n");
@@ -2701,7 +2656,7 @@ script_functions:
     }
 
     function setAutoGrid($document_path, $gap, $color_default, $color_highlight, $top=0, $left=0, $bottom=0, $right=0, $threshold=-65.0, $audioTracking=true, $audioTrackingAutoSwitching=false) {
-        $document_path = trim($document_path, '/');
+        $document_path = normalize_path($document_path);
 
         // Datastore path for autoGrid state
         $state_path = $document_path . '/datastores/autoGrid-state';
@@ -3722,25 +3677,13 @@ script_functions:
             $len = strlen($hex);
 
             // Expand to 8 characters (RRGGBBAA)
-            if ($len === 1) {
-                // #A → #AAAAAAFF
-                $hex = str_repeat($hex, 6) . 'FF';
-            } elseif ($len === 2) {
-                // #AB → #AAAAAABB (6x first + 2x second)
-                $hex = str_repeat($hex[0], 6) . str_repeat($hex[1], 2);
-            } elseif ($len === 3) {
-                // #F73 → #FF7733FF
-                $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].'FF';
-            } elseif ($len === 4) {
-                // #F73A → #FF7733AA
-                $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].$hex[3].$hex[3];
-            } elseif ($len === 6) {
-                // #FF5733 → #FF5733FF
-                $hex = $hex . 'FF';
-            } elseif ($len === 8) {
-                // #FF5733AA → #FF5733AA
-                // Already 8 characters
-            } else {
+            if      ($len === 1) { $hex = str_repeat($hex, 6) . 'FF'; } 
+            elseif  ($len === 2) { $hex = str_repeat($hex[0], 6) . str_repeat($hex[1], 2); } 
+            elseif  ($len === 3) { $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].'FF'; } 
+            elseif  ($len === 4) { $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2].$hex[3].$hex[3]; } 
+            elseif  ($len === 6) { $hex = $hex . 'FF';} 
+            elseif  ($len === 8) { /* simply keep $hex */} 
+            else {
                 debug_print('mimoColor', "mimoColor() ERROR: Invalid hex color length: $color_string\n");
                 return ['red' => 0, 'green' => 0, 'blue' => 0, 'alpha' => 1];
             }
@@ -3789,25 +3732,18 @@ script_functions:
 
         // Find the highest frame number in the queue
         $max_queued_frame = $current_frame;
-        if (!empty($queue)) {
-            $max_queued_frame = max(array_keys($queue));
-        }
+        if (!empty($queue)) $max_queued_frame = max(array_keys($queue));
 
         // Process all queued frames
         while ($current_frame <= $max_queued_frame) {
             process_current_frame();  // Send parallel curls, wait for ALL responses
             $current_frame++;
-
             // Sleep between frames (but not after the last frame)
-            if ($current_frame <= $max_queued_frame) {
-                wait($frame_duration);
-            }
+            if ($current_frame <= $max_queued_frame) wait($frame_duration);
         }
 
         // After all frames are processed, sleep the requested duration
-        if ($frac_seconds > 0) {
-            wait($frac_seconds);
-        }
+        if ($frac_seconds > 0) wait($frac_seconds);
 
         // Reload namedAPI after block execution if requested
         if ($reloadNamedAPI) {
@@ -3839,30 +3775,14 @@ script_functions:
 
         switch ($comp) {
             // we have to trust php's auto-cast here!!!!
-            case '==':
-                $result = ($current_value == $value1);
-                break;
-            case '!=':
-                $result = ($current_value != $value1);
-                break;
-            case '<':
-                $result = ($current_value < $value1);
-                break;
-            case '>':
-                $result = ($current_value > $value1);
-                break;
-            case '<=':
-                $result = ($current_value <= $value1);
-                break;
-            case '>=':
-                $result = ($current_value >= $value1);
-                break;
-            case '<>':
-                $result = ($current_value >= $value1 && $current_value <= $value2);
-                break;
-            case '!<>':
-                $result = !($current_value >= $value1 && $current_value <= $value2);
-                break;
+            case '==': $result = ($current_value == $value1); break;
+            case '!=': $result = ($current_value != $value1); break;
+            case '<':  $result = ($current_value < $value1);  break;
+            case '>':  $result = ($current_value > $value1);  break;
+            case '<=': $result = ($current_value <= $value1); break;
+            case '>=': $result = ($current_value >= $value1); break;
+            case '<>': $result = ($current_value >= $value1 && $current_value <= $value2);   break;
+            case '!<>': $result = !($current_value >= $value1 && $current_value <= $value2); break;
         }
 
         if ($result === false) {
