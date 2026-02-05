@@ -16,6 +16,76 @@ init:
     if (isset($_GET['test']) && $_GET['test']==true) {$background_mode=false; $debug=true;}
     if (isset($_GET['realtime']) && $_GET['realtime']==true) {$background_mode=false; $debug=false;}
 
+api_call_functions:
+    function build_curl_handle($url, $method = 'GET', $body = null, $headers = [], $timeout = 5) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+
+        switch ($method) {
+            case 'POST':
+                curl_setopt($ch, CURLOPT_POST, true);
+                if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+                break;
+            case 'PUT':
+                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+                if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+                break;
+            case 'DELETE':
+                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+                break;
+        }
+
+        if (count($headers) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        }
+
+        return $ch;
+    }
+
+    function single_curl($url, $method = 'GET', $body = null, $headers = [], $timeout = 5) {
+        $ch = build_curl_handle($url, $method, $body, $headers, $timeout);
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        return ['response' => $response, 'http_code' => $http_code];
+    }
+
+    function multi_curl($requests) {
+        $mh = curl_multi_init();
+        $handles = [];
+
+        foreach ($requests as $key => $req) {
+            $ch = build_curl_handle(
+                $req['url'],
+                $req['method'] ?? 'GET',
+                $req['body'] ?? null,
+                $req['headers'] ?? [],
+                $req['timeout'] ?? 5
+            );
+            curl_multi_add_handle($mh, $ch);
+            $handles[$key] = $ch;
+        }
+
+        $running = null;
+        do {
+            curl_multi_exec($mh, $running);
+            curl_multi_select($mh);
+        } while ($running > 0);
+
+        $results = [];
+        foreach ($handles as $key => $ch) {
+            $results[$key] = [
+                'response' => curl_multi_getcontent($ch),
+                'http_code' => curl_getinfo($ch, CURLINFO_HTTP_CODE),
+            ];
+            curl_multi_remove_handle($mh, $ch);
+        }
+        curl_multi_close($mh);
+
+        return $results;
+    }
+
 
 functions:
     function var_dump_inline($var) {
@@ -51,18 +121,14 @@ functions:
             return null;
         }
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
+        $result = single_curl($url_data['url'], 'GET', null, $headers, 5);
+        $response = $result['response'];
+        $http_code = $result['http_code'];
 
         debug_print('datastores', "getDatastore() GET $path → HTTP $http_code\n");
 
@@ -117,22 +183,13 @@ functions:
         // Convert to JSON if array
         $body = is_array($data) ? json_encode($data) : $data;
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-
         $headers = ['Content-Type: application/json'];
         if (strlen($url_data['pwd']) > 0) {
             $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
+        $result = single_curl($url_data['url'], 'PUT', $body, $headers, 5);
+        $http_code = $result['http_code'];
 
         debug_print('datastores', "setDatastore() PUT $path → HTTP $http_code\n");
 
@@ -148,19 +205,13 @@ functions:
             return false;
         }
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        // curl_close($ch); // deprecated since PHP 8.0
+        $result = single_curl($url_data['url'], 'DELETE', null, $headers, 5);
+        $http_code = $result['http_code'];
 
         debug_print('datastores', "deleteDatastore() DELETE $path → HTTP $http_code\n");
 
@@ -252,79 +303,65 @@ functions:
     $hosts = array_get($configuration, 'hosts', default: []);
 
     // Phase 1: load all documents and devices in parallel
-    $mh = curl_multi_init();
-    $curl_handles = [];
+    $requests = [];
+    $request_meta = [];
 
     foreach ($hosts as $host_name => $host) {
         $protocol = array_get($configuration, 'protocol/'.$host_name, default: 'http://');
         $port = array_get($configuration, 'ports/'.$host_name, default: '8989');
         $pwd_hash = array_get($configuration, 'pwd-hash/'.$host_name, default: '');
 
-        // Documents
-        $url = $protocol . $host . ':' . $port . '/api/v1/documents';
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-
+        $headers = [];
         if (strlen($pwd_hash) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
+            $headers[] = 'Authorization: Bearer ' . $pwd_hash;
         }
 
-        curl_multi_add_handle($mh, $ch);
-        $curl_handles[] = ['ch' => $ch, 'host' => $host_name, 'type' => 'documents'];
+        // Documents
+        $key = $host_name . '_documents';
+        $requests[$key] = [
+            'url' => $protocol . $host . ':' . $port . '/api/v1/documents',
+            'method' => 'GET',
+            'headers' => $headers,
+            'timeout' => 5
+        ];
+        $request_meta[$key] = ['host' => $host_name, 'type' => 'documents'];
 
         // Devices (only if needed)
         if ($load['devices']) {
-            $url_devices = $protocol . $host . ':' . $port . '/api/v1/devices';
-
-            $ch_devices = curl_init();
-            curl_setopt($ch_devices, CURLOPT_URL, $url_devices);
-            curl_setopt($ch_devices, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch_devices, CURLOPT_TIMEOUT, 5);
-
-            if (strlen($pwd_hash) > 0) {
-                curl_setopt($ch_devices, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
-            }
-
-            curl_multi_add_handle($mh, $ch_devices);
-            $curl_handles[] = ['ch' => $ch_devices, 'host' => $host_name, 'type' => 'devices'];
+            $key = $host_name . '_devices';
+            $requests[$key] = [
+                'url' => $protocol . $host . ':' . $port . '/api/v1/devices',
+                'method' => 'GET',
+                'headers' => $headers,
+                'timeout' => 5
+            ];
+            $request_meta[$key] = ['host' => $host_name, 'type' => 'devices'];
         }
 
         // Zoom participants (only if needed)
         if ($load['zoom'] ?? false) {
-            $url_zoom = $protocol . $host . ':' . $port . '/api/v1/zoom/participants';
-
-            $ch_zoom = curl_init();
-            curl_setopt($ch_zoom, CURLOPT_URL, $url_zoom);
-            curl_setopt($ch_zoom, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch_zoom, CURLOPT_TIMEOUT, 5);
-
-            if (strlen($pwd_hash) > 0) {
-                curl_setopt($ch_zoom, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $pwd_hash]);
-            }
-
-            curl_multi_add_handle($mh, $ch_zoom);
-            $curl_handles[] = ['ch' => $ch_zoom, 'host' => $host_name, 'type' => 'zoom'];
+            $key = $host_name . '_zoom';
+            $requests[$key] = [
+                'url' => $protocol . $host . ':' . $port . '/api/v1/zoom/participants',
+                'method' => 'GET',
+                'headers' => $headers,
+                'timeout' => 5
+            ];
+            $request_meta[$key] = ['host' => $host_name, 'type' => 'zoom'];
         }
     }
-    
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-        curl_multi_select($mh);
-    } while ($running > 0);
-    
+
+    $results = multi_curl($requests);
+
     // Phase 1 processing: Documents and Devices
     $phase2_queue = [];
 
-    foreach ($curl_handles as $info) {
-        $ch = $info['ch'];
-        $host_name = $info['host'];
-        $type = $info['type'];
-        $response = curl_multi_getcontent($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    foreach ($results as $key => $result) {
+        $meta = $request_meta[$key];
+        $host_name = $meta['host'];
+        $type = $meta['type'];
+        $response = $result['response'];
+        $http_code = $result['http_code'];
 
         if ($http_code === 200 && $response !== false) {
             $data = json_decode($response, true);
@@ -395,44 +432,36 @@ functions:
 
             }
         }
+    }
 
-        curl_multi_remove_handle($mh, $ch);
-        // curl_close($ch); // deprecated since 8.5! And no need
-    }
-    curl_multi_close($mh);
-    
     // Phase 2: Sources, Layers, Layersets, Output-Destinations load all parallel
-    $mh = curl_multi_init();
-    $curl_handles = [];
-    
-    foreach ($phase2_queue as $item) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $item['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        
+    $requests = [];
+    $request_meta = [];
+
+    foreach ($phase2_queue as $idx => $item) {
+        $headers = [];
         if (strlen($item['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $item['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $item['pwd'];
         }
-        
-        curl_multi_add_handle($mh, $ch);
-        $curl_handles[] = ['ch' => $ch, 'meta' => $item];
+
+        $requests[$idx] = [
+            'url' => $item['url'],
+            'method' => 'GET',
+            'headers' => $headers,
+            'timeout' => 5
+        ];
+        $request_meta[$idx] = $item;
     }
-    
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-        curl_multi_select($mh);
-    } while ($running > 0);
-    
+
+    $results = multi_curl($requests);
+
     // Phase 2 preperation
     $phase3_queue = [];
-    
-    foreach ($curl_handles as $info) {
-        $ch = $info['ch'];
-        $meta = $info['meta'];
-        $response = curl_multi_getcontent($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    foreach ($results as $idx => $result) {
+        $meta = $request_meta[$idx];
+        $response = $result['response'];
+        $http_code = $result['http_code'];
         
         if ($http_code === 200 && $response !== false) {
             $data = json_decode($response, true);
@@ -534,42 +563,34 @@ functions:
                 }
             }
         }
-        
-        curl_multi_remove_handle($mh, $ch);
-        // curl_close($ch); // deprecated since 8.5! And no need
     }
-    curl_multi_close($mh);
-    
+
     // Phase 3: Filters und Variants load in parallel
-    $mh = curl_multi_init();
-    $curl_handles = [];
-    
-    foreach ($phase3_queue as $item) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $item['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        
+    $requests = [];
+    $request_meta = [];
+
+    foreach ($phase3_queue as $idx => $item) {
+        $headers = [];
         if (strlen($item['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $item['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $item['pwd'];
         }
-        
-        curl_multi_add_handle($mh, $ch);
-        $curl_handles[] = ['ch' => $ch, 'meta' => $item];
+
+        $requests[$idx] = [
+            'url' => $item['url'],
+            'method' => 'GET',
+            'headers' => $headers,
+            'timeout' => 5
+        ];
+        $request_meta[$idx] = $item;
     }
-    
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-        curl_multi_select($mh);
-    } while ($running > 0);
-    
+
+    $results = multi_curl($requests);
+
     // Phase 3: process
-    foreach ($curl_handles as $info) {
-        $ch = $info['ch'];
-        $meta = $info['meta'];
-        $response = curl_multi_getcontent($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    foreach ($results as $idx => $result) {
+        $meta = $request_meta[$idx];
+        $response = $result['response'];
+        $http_code = $result['http_code'];
         
         if ($http_code === 200 && $response !== false) {
             $data = json_decode($response, true);
@@ -619,11 +640,7 @@ functions:
                 }
             }
         }
-        
-        curl_multi_remove_handle($mh, $ch);
-        // curl_close($ch); // deprecated since 8.5! And no need
     }
-    curl_multi_close($mh);
 
     // special "none" asset for all hosts
     foreach ($hosts as $host_name => $host) {
@@ -997,10 +1014,10 @@ functions:
             return;
         }
 
-        $mh = curl_multi_init();
-        $curl_handles = [];
+        // Phase 1: Prepare all requests
+        $requests = [];
 
-        foreach ($queue[$current_frame] as $action) {
+        foreach ($queue[$current_frame] as $idx => $action) {
             $url_data = build_api_url($action['path']);
 
             if ($url_data === null) {
@@ -1048,18 +1065,19 @@ functions:
                 }
 
                 if ($is_comment) {
-                    // Comments use GET with URL parameters - RFC3986 uses rawurlencode
+                    // Comments use GET with URL parameters
                     $query_string = http_build_query($action['payload'], '', '&', PHP_QUERY_RFC3986);
                     $full_url .= '?' . $query_string;
 
                     debug_print($action['path'], " Using GET with URL parameters for comment\n");
                     debug_print($action['path'], " URL = $full_url\n");
 
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, $full_url);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                    // GET request - no POST needed
+                    $requests[$idx] = [
+                        'url' => $full_url,
+                        'method' => 'GET',
+                        'headers' => $headers,
+                        'timeout' => 5
+                    ];
                 } elseif ($needs_wrapper) {
                     // Output destinations need JSON:API format with PUT
                     $payload = [
@@ -1072,13 +1090,14 @@ functions:
                     debug_print($action['path'], " URL = $full_url\n");
                     debug_print($action['path'], " Payload = " . json_encode($payload) . "\n");
 
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, $full_url);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
                     $headers[] = 'Content-Type: application/json';
+                    $requests[$idx] = [
+                        'url' => $full_url,
+                        'method' => 'PUT',
+                        'body' => json_encode($payload),
+                        'headers' => $headers,
+                        'timeout' => 5
+                    ];
                 } elseif ($is_document_level) {
                     // Document-level properties use PUT without wrapper
                     $json_payload = json_encode($action['payload']);
@@ -1087,13 +1106,14 @@ functions:
                     debug_print($action['path'], " URL = $full_url\n");
                     debug_print($action['path'], " Payload = $json_payload\n");
 
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, $full_url);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, $json_payload);
                     $headers[] = 'Content-Type: application/json';
+                    $requests[$idx] = [
+                        'url' => $full_url,
+                        'method' => 'PUT',
+                        'body' => $json_payload,
+                        'headers' => $headers,
+                        'timeout' => 5
+                    ];
                 } else {
                     // Layers, variants, sources, filters use ?update= URL parameter with GET
                     $json_payload = json_encode($action['payload']);
@@ -1103,44 +1123,28 @@ functions:
                     debug_print($action['path'], " JSON payload = $json_payload\n");
                     debug_print($action['path'], " Final URL = $full_url\n");
 
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, $full_url);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                    // GET request - no CURLOPT_POST needed
+                    $requests[$idx] = [
+                        'url' => $full_url,
+                        'method' => 'GET',
+                        'headers' => $headers,
+                        'timeout' => 5
+                    ];
                 }
             } else {
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $full_url);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+                // Actions without payload (e.g., setLive, setOff, openwebbrowser)
+                $method = ($action['endpoint'] === 'openwebbrowser') ? 'GET' : 'POST';
 
-                // openwebbrowser uses GET, all other actions use POST
-                if ($action['endpoint'] !== 'openwebbrowser') {
-                    curl_setopt($ch, CURLOPT_POST, true);
-                }
+                $requests[$idx] = [
+                    'url' => $full_url,
+                    'method' => $method,
+                    'headers' => $headers,
+                    'timeout' => 5
+                ];
             }
-
-            if (count($headers) > 0) {
-                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-            }
-
-            curl_multi_add_handle($mh, $ch);
-            $curl_handles[] = ['ch' => $ch];
         }
 
-        $running = null;
-        do {
-            curl_multi_exec($mh, $running);
-            curl_multi_select($mh);
-        } while ($running > 0);
-
-        foreach ($curl_handles as $handle_info) {
-            $ch = $handle_info['ch'];
-            curl_multi_remove_handle($mh, $ch);
-        }
-
-        curl_multi_close($mh);
+        // Phase 2: Execute all requests in parallel
+        $results = multi_curl($requests);
 
         unset($queue[$current_frame]);
     }
@@ -2220,17 +2224,13 @@ script_functions:
 
         debug_print('zoom', "zoomJoin() called: url=$url\n");
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $result = single_curl($url, 'GET', null, $headers, 10);
+        $http_code = $result['http_code'];
 
         debug_print('zoom', "zoomJoin() response: HTTP $http_code\n");
 
@@ -2243,17 +2243,13 @@ script_functions:
 
         debug_print('zoom', "zoomLeave() called: url={$url_data['url']}\n");
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
+        $http_code = $result['http_code'];
 
         debug_print('zoom', "zoomLeave() response: HTTP $http_code\n");
 
@@ -2266,17 +2262,13 @@ script_functions:
 
         debug_print('zoom', "zoomEnd() called: url={$url_data['url']}\n");
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
+        $http_code = $result['http_code'];
 
         debug_print('zoom', "zoomEnd() response: HTTP $http_code\n");
 
@@ -2289,17 +2281,14 @@ script_functions:
 
         debug_print('zoom', "zoomParticipants() called: url={$url_data['url']}\n");
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url_data['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $result = single_curl($url_data['url'], 'GET', null, $headers, 10);
+        $response = $result['response'];
+        $http_code = $result['http_code'];
 
         debug_print('zoom', "zoomParticipants() response: HTTP $http_code\n");
 
@@ -2327,17 +2316,13 @@ script_functions:
 
         debug_print('zoom', "zoomMeetingAction() called: url=$url\n");
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
+        $headers = [];
         if (strlen($url_data['pwd']) > 0) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $url_data['pwd']]);
+            $headers[] = 'Authorization: Bearer ' . $url_data['pwd'];
         }
 
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $result = single_curl($url, 'GET', null, $headers, 10);
+        $http_code = $result['http_code'];
 
         debug_print('zoom', "zoomMeetingAction() response: HTTP $http_code\n");
 
