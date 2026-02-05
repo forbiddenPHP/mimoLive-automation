@@ -2805,7 +2805,7 @@ script_functions:
             if ($audio_layer_exists) {
                 debug_print($document_path, "EXCLUSIVE: setLive + volume=1.0 for $audio_layer\n");
                 if (isLive($audio_layer) !== true) setLive($audio_layer);
-                setValue($audio_layer, ['volume' => 1.0]);
+                if (namedAPI_get($audio_layer . '/volume') !== 1.0) setValue($audio_layer, ['volume' => 1.0]);
             }
 
             // Shrink all other layers to center (size 0, border 0)
@@ -2837,7 +2837,7 @@ script_functions:
                     if (isLive($other_audio_layer) !== true) setLive($other_audio_layer);
                     // Keep audio based on status
                     $other_audio_volume = ($status === 'video-and-audio' || $status === 'audio-only') ? 1.0 : 0.0;
-                    setValue($other_audio_layer, ['volume' => $other_audio_volume]);
+                    if (namedAPI_get($other_audio_layer . '/volume') !== $other_audio_volume) setValue($other_audio_layer, ['volume' => $other_audio_volume]);
                 }
             }
 
@@ -2971,7 +2971,7 @@ script_functions:
                 if ($presenter_audio_exists) {
                     if (isLive($presenter_audio) !== true) setLive($presenter_audio);
                     $audio_volume = ($presenter_status === 'video-and-audio' || $presenter_status === 'audio-only' || $presenter_status === 'exclusive') ? 1.0 : 0.0;
-                    setValue($presenter_audio, ['volume' => $audio_volume]);
+                    if (namedAPI_get($presenter_audio . '/volume') !== $audio_volume) setValue($presenter_audio, ['volume' => $audio_volume]);
                 }
 
                 // Collect all positions (except presenter) for zig-zag layout
@@ -3114,8 +3114,9 @@ script_functions:
 
                             // Handle audio layer (only if it exists)
                             if ($audio_layer_exists) {
+                                $a_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
                                 if (isLive($audio_layer) !== true) setLive($audio_layer);
-                                setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+                                if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                             }
                         } else {
                             // Non-visible states: exclude, off, audio-only
@@ -3138,7 +3139,7 @@ script_functions:
 
                                     // Handle audio layer (only if it exists)
                                     if ($audio_layer_exists) {
-                                        setValue($audio_layer, ['volume' => $a_volume]);
+                                        if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                                         $delayed_off[] = $audio_layer;
                                     }
                                 }
@@ -3149,7 +3150,7 @@ script_functions:
                                 // Handle audio layer (only if it exists)
                                 if ($audio_layer_exists) {
                                     if (isLive($audio_layer) !== true) setLive($audio_layer);
-                                    setValue($audio_layer, ['volume' => $a_volume]);
+                                    if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             } elseif ($status === 'audio-only') {
                                 if (isLive($video_layer) !== true) setLive($video_layer);
@@ -3158,7 +3159,7 @@ script_functions:
                                 // Handle audio layer (only if it exists)
                                 if ($audio_layer_exists) {
                                     if (isLive($audio_layer) !== true) setLive($audio_layer);
-                                    setValue($audio_layer, ['volume' => $a_volume]);
+                                    if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                                 }
                             }
                         }
@@ -3197,7 +3198,7 @@ script_functions:
                         // Handle audio layer (only if it exists)
                         if ($presenter_audio_exists) {
                             if (isLive($presenter_audio) !== true) setLive($presenter_audio);
-                            setValue($presenter_audio, ['volume' => $a_volume]);
+                            if (namedAPI_get($presenter_audio . '/volume') !== $a_volume) setValue($presenter_audio, ['volume' => $a_volume]);
                         }
                     }
                 }
@@ -3291,8 +3292,9 @@ script_functions:
 
                         // Handle audio layer (only if it exists)
                         if ($audio_layer_exists) {
+                            $a_volume = ($status === 'audio-only') ? 1.0 : 0.0;
                             if (isLive($audio_layer) !== true) setLive($audio_layer);
-                            setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+                            if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                         }
                     }
                 }
@@ -3381,8 +3383,9 @@ script_functions:
 
                     // Handle audio layer (only if it exists)
                     if ($audio_layer_exists) {
+                        $a_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
                         if (isLive($audio_layer) !== true) setLive($audio_layer);
-                        setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+                        if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                     }
                 } else {
                     // Volume logic for non-visible: if a_* exists, av_* always gets volume=0
@@ -3394,8 +3397,9 @@ script_functions:
 
                     // Handle audio layer (only if it exists)
                     if ($audio_layer_exists) {
+                        $a_volume = ($status === 'audio-only') ? 1.0 : 0.0;
                         if (isLive($audio_layer) !== true) setLive($audio_layer);
-                        setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+                        if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
                     }
                 }
             }
@@ -3465,8 +3469,9 @@ script_functions:
 
             // Handle audio layer (only if it exists)
             if ($audio_layer_exists) {
+                $a_volume = ($status === 'video-and-audio') ? 1.0 : 0.0;
                 if (isLive($audio_layer) !== true) setLive($audio_layer);
-                setValue($audio_layer, ['volume' => ($status === 'video-and-audio') ? 1.0 : 0.0]);
+                if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
             }
 
             $visible_idx++;
@@ -3508,8 +3513,9 @@ script_functions:
 
             // Handle audio layer (only if it exists)
             if ($audio_layer_exists) {
+                $a_volume = ($status === 'audio-only') ? 1.0 : 0.0;
                 if (isLive($audio_layer) !== true) setLive($audio_layer);
-                setValue($audio_layer, ['volume' => ($status === 'audio-only') ? 1.0 : 0.0]);
+                if (namedAPI_get($audio_layer . '/volume') !== $a_volume) setValue($audio_layer, ['volume' => $a_volume]);
             }
         }
     }
