@@ -3587,10 +3587,10 @@ script_functions:
 
     function mimoCrop($prefix, $top, $bottom, $left, $right, $namedAPI_path = null) {
         // If any value is a pixel number (not a percentage string), we need resolution
-        $needs_resolution = !is_string($top) || !str_ends_with($top, '%') ||
-                           !is_string($bottom) || !str_ends_with($bottom, '%') ||
-                           !is_string($left) || !str_ends_with($left, '%') ||
-                           !is_string($right) || !str_ends_with($right, '%');
+        $needs_resolution = !is_string($top)    || !str_ends_with($top, '%') ||
+                            !is_string($bottom) || !str_ends_with($bottom, '%') ||
+                            !is_string($left)   || !str_ends_with($left, '%') ||
+                            !is_string($right)  || !str_ends_with($right, '%');
 
         $width = null;
         $height = null;
@@ -3635,29 +3635,10 @@ script_functions:
         }
 
         // Convert values to percentages
-        if (is_string($top) && str_ends_with($top, '%')) {
-            $top_percent = (float)rtrim($top, '%');
-        } else {
-            $top_percent = ($top / $height) * 100.0;
-        }
-
-        if (is_string($bottom) && str_ends_with($bottom, '%')) {
-            $bottom_percent = (float)rtrim($bottom, '%');
-        } else {
-            $bottom_percent = ($bottom / $height) * 100.0;
-        }
-
-        if (is_string($left) && str_ends_with($left, '%')) {
-            $left_percent = (float)rtrim($left, '%');
-        } else {
-            $left_percent = ($left / $width) * 100.0;
-        }
-
-        if (is_string($right) && str_ends_with($right, '%')) {
-            $right_percent = (float)rtrim($right, '%');
-        } else {
-            $right_percent = ($right / $width) * 100.0;
-        }
+        $top_percent    = (is_string($top)    && str_ends_with($top, '%'))    ? (float)rtrim($top, '%')    : ($top    / $height) * 100.0;
+        $bottom_percent = (is_string($bottom) && str_ends_with($bottom, '%')) ? (float)rtrim($bottom, '%') : ($bottom / $height) * 100.0;
+        $left_percent   = (is_string($left)   && str_ends_with($left, '%'))   ? (float)rtrim($left, '%')   : ($left   / $width)  * 100.0;
+        $right_percent  = (is_string($right)  && str_ends_with($right, '%'))  ? (float)rtrim($right, '%')  : ($right  / $width)  * 100.0;
 
         // Build result array with proper key names
         return [
