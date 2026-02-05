@@ -332,13 +332,21 @@ Control Zoom meetings directly from mimoLive. Requires a mimoLive Studio license
   // Join with options (display name, virtual camera)
   zoomJoin('hosts/master', '123456789', 'secret123', [
       'displayname' => 'mimoLive Studio',
-      'virtualcamera' => true  // Send program output back to Zoom
+      'virtualcamera' => true,  // Send program output back to Zoom
+      'zoomaccountname' => 'My Zoom Account'
+  ]);
+
+  // Join a webinar (requires webinar token)
+  zoomJoin('hosts/master', '987654321', 'webinar123', [
+      'webinartoken' => 'your-webinar-token-here'
   ]);
 
   // Re-join with stored credentials (from previous call)
   zoomJoin('hosts/master');
   ```
   *Credentials are stored in the document's datastore and reused if not provided. Skips the join if already in meeting with same credentials.*
+
+  *Options: `displayname` (string), `zoomaccountname` (string), `virtualcamera` (bool), `webinartoken` (string - required for webinars)*
 
 - **`zoomLeave($host_path)`** - Leave the current meeting
   ```php
@@ -356,21 +364,26 @@ Control Zoom meetings directly from mimoLive. Requires a mimoLive Studio license
   // Returns array with participant data
   ```
 
-- **`zoomMeetingAction($host_path, $command)`** - Execute meeting actions
+- **`zoomMeetingAction($host_path, $command, $userid = null, $screentype = null)`** - Execute meeting actions
   ```php
+  // Meeting-wide actions (no userid required)
   zoomMeetingAction('hosts/master', 'muteAll');
   zoomMeetingAction('hosts/master', 'lockMeeting');
   zoomMeetingAction('hosts/master', 'lowerAllHands');
+
+  // Participant-specific actions (userid required)
+  zoomMeetingAction('hosts/master', 'muteVideo', '12345678');
+  zoomMeetingAction('hosts/master', 'unmuteAudio', '87654321');
   ```
   *Available commands:*
   - `requestRecordingPermission`
-  - `muteVideo`, `unmuteVideo`
-  - `muteAudio`, `unmuteAudio`
+  - `muteVideo`, `unmuteVideo` (require `$userid` parameter)
+  - `muteAudio`, `unmuteAudio` (require `$userid` parameter)
   - `enableUnmuteBySelf`, `disableUnmuteBySelf`
   - `muteAll`, `unmuteAll`
   - `lockMeeting`, `unlockMeeting`
   - `lowerAllHands`
-  - `shareFitWindowMode`, `shareOriginSizeMode`
+  - `shareFitWindowMode`
   - `pauseShare`, `resumeShare`
   - `joinVoip`, `leaveVoip`
   - `allowParticipantsToChat`, `disallowParticipantsToChat`
@@ -582,6 +595,61 @@ These functions simplify common tasks:
   $variant_id = getID($base.'layers/Lower3rd/variants/Red');
   ```
   *Returns: The resource ID string, or `'2124830483-com.mimolive.source.nonesource'` if path not found*
+
+- **`getSubType($path, $awaited=null)`** - Get the subtype/composition-id of any resource
+  ```php
+  // Get layer type
+  $type = getSubType($base.'layers/Lower3rd');
+  // Returns: "2100989048-com.boinx.LowerThird"
+
+  // Get source type
+  $type = getSubType($base.'sources/Camera');
+  // Returns: "1836019824-com.boinx.VideoSource"
+
+  // Get filter type
+  $type = getSubType($base.'sources/Camera/filters/Blur');
+  // Returns: "2103787808-com.boinx.GaussianBlur"
+
+  // Check if resource is specific type (returns boolean)
+  if (getSubType($base.'layers/Lower3rd', '2100989048-com.boinx.LowerThird')) {
+      echo "This is a Lower Third layer!";
+  }
+
+  // Works with variants (fallback to layer type if variant has no type)
+  $type = getSubType($base.'layers/Lower3rd/variants/Red');
+
+  // Layer-sets return "layer-set" string
+  $type = getSubType($base.'layer-sets/Graphics');
+  // Returns: "layer-set"
+
+  // Returns null if resource not found or has no type
+  $type = getSubType($base.'layers/NonExistent');
+  // Returns: null
+  ```
+  *Returns: Type string (e.g., composition-id, source-type), "layer-set" for layer-sets, or `null` if not found. If `$awaited` is provided, returns `true` (matches), `false` (doesn't match), or `null` (resource doesn't exist).*
+
+- **`isSubType($path, $awaited)`** - Check if a resource matches a specific subtype
+  ```php
+  // More readable type checking (semantic wrapper for getSubType)
+  if (isSubType($base.'layers/Lower3rd', '2100989048-com.boinx.LowerThird')) {
+      echo "This is a Lower Third layer!";
+  }
+
+  // Check source type
+  if (isSubType($base.'sources/Camera', 'com.boinx.mimoLive.sources.deviceVideoSource')) {
+      echo "This is a device video source!";
+  }
+
+  // Check layer-set
+  if (isSubType($base.'layer-sets/Graphics', 'layer-set')) {
+      echo "This is a layer-set!";
+  }
+
+  // Handle non-existent resources
+  $result = isSubType($base.'layers/NonExistent', 'some-type');
+  // Returns: null (resource doesn't exist)
+  ```
+  *Returns: `true` (matches), `false` (doesn't match), or `null` (resource doesn't exist)*
 
 - **`mimoColor($color_string)`** - Convert color strings to mimoLive color format
   ```php

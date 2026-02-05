@@ -42,14 +42,6 @@ functions:
         }
     }
 
-       /**
-     * Get data from a datastore (synchronous - not queued)
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @param string|null $keypath Optional keypath to get specific value (e.g., 'input-values/score')
-     * @param string $separator Separator for keypath (default: '/')
-     * @return mixed The data, or null if not found
-     */
     function getDatastore($path, $keypath = null, $separator = '/') {
         $path = trim($path, '/');
 
@@ -97,15 +89,6 @@ functions:
         return $data;
     }
 
-    /**
-     * Set data in a datastore (synchronous - not queued)
-     * Deep-merges with existing data by default
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @param mixed $data Data to store
-     * @param bool $replace If true, replace entire store instead of merging
-     * @return bool Success
-     */
     function setDatastore($path, $data, $replace = false) {
         $path = trim($path, '/');
 
@@ -156,12 +139,6 @@ functions:
         return $http_code === 200;
     }
 
-    /**
-     * Delete a datastore (synchronous - not queued)
-     *
-     * @param string $path Full path: hosts/HOSTNAME/documents/DOCNAME/datastores/STOREID
-     * @return bool Success
-     */
     function deleteDatastore($path) {
         $path = trim($path, '/');
 
@@ -188,6 +165,69 @@ functions:
         debug_print('datastores', "deleteDatastore() DELETE $path → HTTP $http_code\n");
 
         return $http_code === 200;
+    }
+
+    function getSubType($path, $awaited = null) {
+        $path = trim($path, '/');
+        $type_value = null;
+
+        // Detect resource type and build appropriate type field path
+        if (stripos($path, '/layers/') !== false) {
+            // Layers or Variants
+            if (stripos($path, '/variants/') !== false) {
+                // Try variant's composition-id first
+                $type_value = namedAPI_get($path . '/composition-id');
+
+                // Fallback to layer's composition-id if variant doesn't have it
+                if ($type_value === null) {
+                    // Remove /variants/NAME part to get layer path
+                    $layer_path = preg_replace('#/variants/[^/]+$#', '', $path);
+                    $type_value = namedAPI_get($layer_path . '/composition-id');
+                }
+            } else {
+                // Regular layer
+                $type_value = namedAPI_get($path . '/composition-id');
+            }
+        } elseif (stripos($path, '/sources/') !== false) {
+            // Sources or Filters
+            if (stripos($path, '/filters/') !== false) {
+                // Filter
+                $type_value = namedAPI_get($path . '/composition-id');
+            } else {
+                // Source
+                $type_value = namedAPI_get($path . '/source-type');
+            }
+        } elseif (stripos($path, '/output-destinations/') !== false) {
+            // Output destination
+            $type_value = namedAPI_get($path . '/type');
+        } elseif (stripos($path, '/layer-sets/') !== false) {
+            // Layer-set: check if active field exists
+            $active = namedAPI_get($path . '/active');
+            if ($active !== null) {
+                $type_value = 'layer-set';
+            }
+        } elseif (stripos($path, '/devices/') !== false) {
+            // Device
+            $type_value = namedAPI_get($path . '/device-type');
+        }
+
+        // If awaited comparison requested, return boolean or null
+        if ($awaited !== null) {
+            // If resource doesn't exist, return null
+            if ($type_value === null) {
+                return null;
+            }
+            // Otherwise return boolean comparison
+            return ($type_value == $awaited);
+        }
+
+        // Return the type value (string or null)
+        return $type_value;
+    }
+
+    function isSubType($path, $awaited) {
+        // getSubType with $awaited parameter returns true, false, or null
+        return getSubType($path, $awaited);
     }
 
 
@@ -1409,6 +1449,8 @@ read_script:
         'mimocrop(' => 'mimoCrop(',
         'mimocolor(' => 'mimoColor(',
         'getid(' => 'getID(',
+        'getsubtype(' => 'getSubType(',
+        'issubtype(' => 'isSubType(',
         'wait(' => 'wait(',
         'run(' => 'run(',
         'zoomjoin(' => 'zoomJoin(',
@@ -1545,12 +1587,6 @@ script_functions:
         queue_action($current_frame, $namedAPI_path, 'toggleLive');
     }
 
-    /**
-     * Check if a layer, variant, layer-set, or output-destination is live/active
-     *
-     * @param string $namedAPI_path Path to check
-     * @return bool|null true = live/active, false = not live/inactive, null = path not found or no such field
-     */
     function isLive($namedAPI_path) {
         $namedAPI_path = trim($namedAPI_path, '/');
 
@@ -2075,9 +2111,6 @@ script_functions:
 
     // ==================== ZOOM FUNCTIONS ====================
 
-    /**
-     * Helper function to build Zoom API URL from host path
-     */
     function _buildZoomUrl($host_path, $endpoint) {
         global $configuration;
 
@@ -2105,9 +2138,6 @@ script_functions:
         return ['url' => $url, 'pwd' => $pwd_hash, 'host_name' => $host_name];
     }
 
-    /**
-     * Helper function to get/set Zoom credentials from datastore
-     */
     function _getZoomDatastorePath($host_path) {
         // We need a document path for the datastore
         // Use the first available document for this host
@@ -2124,16 +2154,6 @@ script_functions:
         return 'hosts/'.$host_name.'/documents/'.$first_doc.'/datastores/zoom-credentials';
     }
 
-    /**
-     * Join a Zoom meeting
-     * Credentials are stored in datastore and reused if not provided
-     *
-     * @param string $host_path Host path (e.g., 'hosts/master')
-     * @param string|null $meetingid Meeting ID (optional if previously stored)
-     * @param string|null $passcode Meeting passcode (optional)
-     * @param array $options Optional: displayname, zoomaccountname, virtualcamera (bool)
-     * @return bool Success
-     */
     function zoomJoin($host_path, $meetingid = null, $passcode = null, $options = []) {
         $url_data = _buildZoomUrl($host_path, 'join');
         if ($url_data === null) return false;
@@ -2183,7 +2203,7 @@ script_functions:
         if ($passcode !== null) {
             $params['passcode'] = $passcode;
         }
-        // Optional parameters: displayname, zoomaccountname, virtualcamera
+        // Optional parameters: displayname, zoomaccountname, virtualcamera, webinartoken
         if (isset($options['displayname'])) {
             $params['displayname'] = $options['displayname'];
         }
@@ -2192,6 +2212,9 @@ script_functions:
         }
         if (isset($options['virtualcamera'])) {
             $params['virtualcamera'] = $options['virtualcamera'] ? 'true' : 'false';
+        }
+        if (isset($options['webinartoken'])) {
+            $params['webinartoken'] = $options['webinartoken'];
         }
         $url = $url_data['url'] . '?' . http_build_query($params);
 
@@ -2214,12 +2237,6 @@ script_functions:
         return $http_code >= 200 && $http_code < 300;
     }
 
-    /**
-     * Leave the current Zoom meeting
-     *
-     * @param string $host_path Host path (e.g., 'hosts/master')
-     * @return bool Success
-     */
     function zoomLeave($host_path) {
         $url_data = _buildZoomUrl($host_path, 'leave');
         if ($url_data === null) return false;
@@ -2243,12 +2260,6 @@ script_functions:
         return $http_code >= 200 && $http_code < 300;
     }
 
-    /**
-     * End the current Zoom meeting (host only)
-     *
-     * @param string $host_path Host path (e.g., 'hosts/master')
-     * @return bool Success
-     */
     function zoomEnd($host_path) {
         $url_data = _buildZoomUrl($host_path, 'end');
         if ($url_data === null) return false;
@@ -2272,12 +2283,6 @@ script_functions:
         return $http_code >= 200 && $http_code < 300;
     }
 
-    /**
-     * Get list of Zoom meeting participants
-     *
-     * @param string $host_path Host path (e.g., 'hosts/master')
-     * @return array|null Array of participants or null on error
-     */
     function zoomParticipants($host_path) {
         $url_data = _buildZoomUrl($host_path, 'participants');
         if ($url_data === null) return null;
@@ -2306,19 +2311,19 @@ script_functions:
         return null;
     }
 
-    /**
-     * Perform a Zoom meeting action (mute, unmute, lock, etc.)
-     *
-     * @param string $host_path Host path (e.g., 'hosts/master')
-     * @param string $command Command to perform (e.g., 'muteAll', 'lockMeeting', 'lowerAllHands')
-     * @return bool Success
-     */
-    function zoomMeetingAction($host_path, $command) {
+    function zoomMeetingAction($host_path, $command, $userid = null, $screentype = null) {
         $url_data = _buildZoomUrl($host_path, 'meetingaction');
         if ($url_data === null) return false;
 
-        // Build URL with command
-        $url = $url_data['url'] . '?command=' . urlencode($command);
+        // Build URL with command and optional parameters
+        $params = ['command' => $command];
+        if ($userid !== null) {
+            $params['userid'] = $userid;
+        }
+        if ($screentype !== null) {
+            $params['screentype'] = $screentype;
+        }
+        $url = $url_data['url'] . '?' . http_build_query($params);
 
         debug_print('zoom', "zoomMeetingAction() called: url=$url\n");
 
@@ -2365,10 +2370,6 @@ script_functions:
         setValue($namedAPI_path, [$property => $value]);
     }
 
-    /**
-     * Set appearance properties for a PIP Window (Video Placer) layer
-     * Combines position, border, corner radius, shape and volume into one call
-     */
     function setPIPWindowLayerAppearance($layer, $w, $h, $y, $x, $doc_path, $border_color, $border_width, $corner_radius, $volume) {
         setValue($layer, [
             'input-values' => [
