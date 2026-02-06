@@ -66,10 +66,10 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
 
 ```php
 // Call a prepared Script from scripts-Folder (without .php):
-httpRequest(http://localhost:8888/?f=scriptname)
+httpRequest("http://localhost:8888/?f=scriptname")
 
 // Call an inline action (must be urlencoded!):
-httpRequest(http://localhost:8888/?q=setLive%28%27fullpath%27%29)
+httpRequest("http://localhost:8888/?q=setLive%28%27fullpath%27%29")
 ```
 
 > ⚠️ **Important:** Use `&realtime=true` if mimoLive should wait for the script execution to complete before continuing. **This is only possible if the script does not take longer than 9 seconds!**
