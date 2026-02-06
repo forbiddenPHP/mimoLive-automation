@@ -1942,7 +1942,136 @@ script_functions:
         }
         queue_action($current_frame, $namedAPI_path, '', $updates_array);
     }
+        
+    function setAndAdjustAnnotationText($path, $text, $top, $left, $width, $height, $padding_pct = 5, $maxFontSize = 200, $minFontSize = 8) {
+        $path = normalize_path($path);
 
+        // use existing text
+        if ($text===null || $text =='') {
+            $text=namedAPI_get($path.'/input-values/tvGroup_Content__Text_TypeMultiline');
+        }
+
+        // --- 1. Get document resolution ---
+        $parts = explode('/', $path);
+        $doc_path = implode('/', array_slice($parts, 0, 4));
+        $doc_width  = namedAPI_get($doc_path . '/metadata/width')  ?? 1920;
+        $doc_height = namedAPI_get($doc_path . '/metadata/height') ?? 1080;
+        $half_w = $doc_width  / 2;  // 960 for 1920
+        $half_h = $doc_height / 2;  // 540 for 1080
+
+        // --- 2. Convert top/left/width/height to margins ---
+        $left_px   = $left;
+        $top_px    = $top;
+        $right_px  = $doc_width  - $left - $width;
+        $bottom_px = $doc_height - $top  - $height;
+
+        // --- 3. Calculate available text area ---
+        // Padding: percentage of box height → Inset in BoinxUnits Y
+        $padding_px    = ($height * $padding_pct) / 100.0;
+        $inset_bu      = $padding_px / $half_h;
+
+        // Inset is anamorph: horizontal padding is inset_bu × half_w
+        $padding_h_px = $inset_bu * $half_w;
+        $padding_v_px = $inset_bu * $half_h;  // = $padding_px
+
+        // Available text area after padding
+        $text_area_w = $width  - 2 * $padding_h_px;
+        $text_area_h = $height - 2 * $padding_v_px;
+
+        if ($text_area_w <= 0 || $text_area_h <= 0) {
+            debug_print($path, "setAndAdjustAnnotationText() ERROR: No space left after padding\n");
+            return;
+        }
+
+        // --- 3. Get font info ---
+        $fontName = namedAPI_get($path . '/input-values/tvGroup_Appearance__Text_TypeFontName') ?? 'HelveticaNeue-Bold';
+        $fontPath = _findFontPath($fontName);
+
+        if ($fontPath === null) {
+            debug_print($path, "setAndAdjustAnnotationText() ERROR: Font '$fontName' not found\n");
+            return;
+        }
+
+        // --- 4. Binary search for optimal font size ---
+        $lo = $minFontSize;
+        $hi = $maxFontSize;
+        $bestSize = $lo;
+
+        while ($lo <= $hi) {
+            $mid = floor(($lo + $hi) / 2);
+
+            if (_textFitsInBox($text, $fontPath, $mid, $text_area_w, $text_area_h)) {
+                $bestSize = $mid;
+                $lo = $mid + 1;
+            } else {
+                $hi = $mid - 1;
+            }
+        }
+
+        debug_print($path, "setAndAdjustAnnotationText(): text='$text', font=$fontName, size={$bestSize}px, box={$text_area_w}x{$text_area_h}px\n");
+
+        // --- 5. Convert to BoinxUnits and send ---
+        $fontBoinxSize = $bestSize / $half_h;
+
+        setValue($path, [
+            'input-values' => [
+                'tvGroup_Content__Text_TypeMultiline'              => $text,
+                'tvGroup_Appearance__Text_TypeFontBoinxSize'        => $fontBoinxSize,
+                'tvGroup_Geometry__Left_Margin_TypeBoinxX'          => $left_px    / $half_w,
+                'tvGroup_Geometry__Right_Margin_TypeBoinxX'         => $right_px   / $half_w,
+                'tvGroup_Geometry__Top_Margin_TypeBoinxY'           => $top_px     / $half_h,
+                'tvGroup_Geometry__Bottom_Margin_TypeBoinxY'        => $bottom_px  / $half_h,
+                'tvGroup_Geometry__Inset_TypeBoinxY'                => $inset_bu,
+            ]
+        ]);
+    }
+
+    function _findFontPath($fontName) {
+        static $cache = [];
+
+        if (isset($cache[$fontName])) return $cache[$fontName];
+
+        $escaped = escapeshellarg($fontName);
+        $result = trim(shell_exec("mdfind \"kMDItemFonts == $escaped\"") ?? '');
+
+        if (strlen($result) > 0) {
+            $lines = explode("\n", $result);
+            $cache[$fontName] = $lines[0];
+            return $lines[0];
+        }
+
+        return null;
+    }
+
+function _textFitsInBox($text, $fontPath, $fontSize, $maxWidth, $maxHeight) {
+    $lineHeight = $fontSize * 1.2;
+
+    // 1. Check: no single word wider than box
+    $words = explode(' ', $text);
+    foreach ($words as $word) {
+        $bbox = imagettfbbox($fontSize, 0, $fontPath, $word);
+        if (abs($bbox[2] - $bbox[0]) > $maxWidth) return false;
+    }
+
+    // 2. Simulate word-wrap to count lines
+    $lines = 1;
+    $currentLine = '';
+
+    foreach ($words as $word) {
+        $testLine = ($currentLine === '') ? $word : $currentLine . ' ' . $word;
+        $bbox = imagettfbbox($fontSize, 0, $fontPath, $testLine);
+
+        if (abs($bbox[2] - $bbox[0]) > $maxWidth && $currentLine !== '') {
+            $lines++;
+            $currentLine = $word;
+        } else {
+            $currentLine = $testLine;
+        }
+    }
+
+    // 3. Check: total height fits
+    return ($lines * $lineHeight) <= $maxHeight;
+}
 
     function cleanMessage(string $message): string
     {
