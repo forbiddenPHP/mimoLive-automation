@@ -6,7 +6,8 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
 
 ---
 
-## Installation
+<details>
+<summary><strong>Installation</strong></summary>
 
 1. **Clone this repository**
    ```bash
@@ -59,6 +60,7 @@ The system loads the complete mimoLive API hierarchy (documents, layers, variant
    ```bash
    curl http://localhost:8888/?list
    ```
+</details>
 
 ---
 
