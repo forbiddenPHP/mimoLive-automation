@@ -99,6 +99,65 @@ functions:
         var_dump($var);
         return ob_get_clean();
     }
+
+    // ===== Stack functions =====
+    function stack_file() {
+        return __DIR__ . '/buffer/stack.json';
+    }
+
+    function stack_read() {
+        $fp = fopen(stack_file(), 'c+');
+        if (!$fp) return [];
+        flock($fp, LOCK_SH);
+        $content = stream_get_contents($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        if ($content === false || strlen(trim($content)) === 0) return [];
+        $data = json_decode($content, true);
+        return is_array($data) ? $data : [];
+    }
+
+    function stack_push($script) {
+        $fp = fopen(stack_file(), 'c+');
+        if (!$fp) return false;
+        flock($fp, LOCK_EX);
+        $content = stream_get_contents($fp);
+        $stack = (strlen(trim($content)) > 0) ? json_decode($content, true) : [];
+        if (!is_array($stack)) $stack = [];
+        $id = count($stack) > 0 ? max(array_column($stack, 'id')) + 1 : 1;
+        $stack[] = ['id' => $id, 'script' => $script, 'added' => date('c')];
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode(array_values($stack), JSON_PRETTY_PRINT));
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return $id;
+    }
+
+    function stack_pop($count = 1) {
+        $fp = fopen(stack_file(), 'c+');
+        if (!$fp) return [];
+        flock($fp, LOCK_EX);
+        $content = stream_get_contents($fp);
+        $stack = (strlen(trim($content)) > 0) ? json_decode($content, true) : [];
+        if (!is_array($stack) || empty($stack)) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            return [];
+        }
+        usort($stack, function($a, $b) { return $a['id'] <=> $b['id']; });
+        $count = min($count, count($stack));
+        $popped = array_splice($stack, 0, $count);
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode(array_values($stack), JSON_PRETTY_PRINT));
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return $popped;
+    }
+
     function debug_print($key, $message, $frame=null) {
         global $debug, $OUTPUT, $current_frame;
         if ($debug === true) {
@@ -1389,11 +1448,63 @@ check_list:
         goto input_done;
     }
 
+validate_stack_params:
+    // q/f and processStackElements cannot be used together
+    $has_script_param = (array_get($_GET, 'q') !== null) || (array_get($_GET, 'f') !== null);
+    $has_process_stack = isset($_GET['processStackElements']);
+    if ($has_script_param && $has_process_stack) {
+        global $OUTPUT;
+        array_set($OUTPUT, 'code', 400);
+        array_set($OUTPUT, 'message', 'Cannot use q/f and processStackElements at the same time.');
+        goto input_done;
+    }
+
 read_script:
+    // processStackElements: pop oldest elements from the stack and execute them
+    if ($has_process_stack) {
+        $count = intval($_GET['processStackElements']);
+        if ($count < 1) $count = 1;
+        $popped = stack_pop($count);
+        if (empty($popped)) {
+            // Nothing on the stack — behave as if no script was given
+            goto error_no_script;
+        }
+        $scripts = array_column($popped, 'script');
+        $script = implode("\n", $scripts);
+
+        // Stack scripts always run in realtime (like &realtime=true)
+        $background_mode = false;
+
+        // Automatic script end (direct execution from stack)
+        $script = $script."\n"."// Automatic script end:\n".';'."\n".'setSleep(0, false);';
+
+        goto skip_stack_push;
+    }
+
     $script = array_get($_GET, 'q') ?? trim(' '.str_replace('<?php','',@file_get_contents('scripts/'.array_get($_GET, 'f').'.php'))) ?? '';
     if (strlen(trim($script))==0) {goto error_no_script; }
 
+    // toStack: push script onto the stack instead of executing it
+    if (isset($_GET['toStack'])) {
+        $stack_id = stack_push($script);
+        if ($stack_id === false) {
+            global $OUTPUT;
+            array_set($OUTPUT, 'code', 500);
+            array_set($OUTPUT, 'message', 'Failed to write to stack.');
+            goto input_done;
+        }
+        global $OUTPUT;
+        array_set($OUTPUT, 'code', 200);
+        array_set($OUTPUT, 'message', 'Script pushed to stack.');
+        array_set($OUTPUT, 'stackId', $stack_id);
+        $everything_is_fine = true;
+        goto input_done;
+    }
+
+    // Direct execution: append automatic script end
     $script = $script."\n"."// Automatic script end:\n".';'."\n".'setSleep(0, false);';
+
+skip_stack_push:
 
     $replacements = [
         'islive(' => 'isLive(',
@@ -1950,6 +2061,14 @@ script_functions:
         if ($text===null || $text =='') {
             $text=namedAPI_get($path.'/input-values/tvGroup_Content__Text_TypeMultiline');
         }
+
+        if (strlen($text.' ')==1) { 
+            // avoid divisions by zero
+            $text=' '; 
+            debug_print($path, "setAndAdjustAnnotationText() WARNING: Text contains no string!\n");
+            debug_print();
+        
+        } 
 
         // --- 1. Get document resolution ---
         $parts = explode('/', $path);

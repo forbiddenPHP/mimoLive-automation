@@ -1170,6 +1170,57 @@ wait(1.0); // Wait 1 second, no frame processing
 
 ---
 
+## 📦 Script Stack
+
+Scripts can be pushed to a stack and executed later in order. The stack is process-safe (file locking via `LOCK_SH`/`LOCK_EX` on `buffer/stack.json`).
+
+> 💡 **Use Case:** Especially useful when working with chatbots or external systems that trigger events. Without the stack, simultaneous events would execute in parallel and interfere with each other. The stack buffers them and guarantees sequential execution.
+
+<details>
+<summary><strong>?f=scriptname&toStack</strong> or <strong>?q=...&toStack</strong> - Push script to stack instead of executing</summary>
+
+- Script is **not** executed, only stored on the stack
+- Returns `stackId` (ascending, preserves order)
+- Works with both `f` (file) and `q` (inline) scripts
+
+```zsh
+# Push a file script
+curl "http://localhost:8888/?f=meinScript&toStack"
+
+# Push an inline script
+curl "http://localhost:8888/?q=setLive%28%27hosts/master/documents/MyShow/layers/Comments%27%29&toStack"
+```
+
+**Response:**
+```json
+{
+  "code": 200,
+  "message": "Script pushed to stack.",
+  "stackId": 1
+}
+```
+</details>
+
+<details>
+<summary><strong>?processStackElements=N</strong> - Execute oldest N scripts from the stack</summary>
+
+- Pops the N oldest entries from the stack and executes them
+- Without a number (or 0): processes exactly 1 element
+- If the stack is empty, nothing happens (as if no script was provided)
+- **Cannot** be combined with `q` or `f` (returns HTTP 400)
+- **Always runs in realtime** (like `&realtime=true`) — the caller waits for completion
+
+```zsh
+# Process the oldest element
+curl "http://localhost:8888/?processStackElements"
+
+# Process the 3 oldest elements
+curl "http://localhost:8888/?processStackElements=3"
+```
+</details>
+
+---
+
 ## 🐛 Debugging & Development
 
 Use Firefox to call `?list`, `translate`, `?{any}&test=true`, or `?{any}&realtime=true`. It can render json.
