@@ -1221,6 +1221,48 @@ curl "http://localhost:8888/?processStackElements=3"
 ```
 </details>
 
+### Twitch Bot Integration
+
+The [forbiddenPHP/twitchbot](https://github.com/forbiddenPHP/twitchbot) can push Twitch events to the Script Stack for sequential processing. This prevents simultaneous events from interfering with each other — they are buffered on the stack and executed one by one.
+
+The included demo document `comments-test.tvShow` contains all required layers (Annotation Text, Annotation Audio, Annotation Image, Scripts) pre-configured for this setup.
+
+**How it works:**
+
+1. **Twitch Bot** pushes events to the stack via `&toStack` (no execution, just queuing)
+2. **mimoLive** runs a Script layer (`listen-to-chatbot`) that polls the stack in a loop:
+   ```php
+   httpRequest("http://localhost:8888/?processStackElements=1")
+   sleep(2)
+   // loop
+   ```
+3. Each element is executed **sequentially and blocking** (~8 seconds per element)
+4. When the stack is empty, `200 OK` is returned and mimoLive continues polling
+
+<details>
+<summary><strong>Available Endpoints (for the bot)</strong></summary>
+
+```
+GET /?f=functions/gift-sub&toStack&username={user}&giftcount={count}&tier={tier}
+GET /?f=functions/new-sub&toStack&username={user}&tier={tier}
+GET /?f=functions/cheer-alert&toStack&username={user}&bits={bits}
+GET /?f=functions/hype-chat&toStack&username={user}&amount={amount}&currency={currency}&level={level}
+GET /?f=functions/raid-alert&toStack&username={user}&viewers={viewers}&userimageurl={imageurl}
+```
+
+**Important:** The bot only pushes to the stack. Processing (`processStackElements`) is handled exclusively by mimoLive's `listen-to-chatbot` Script layer.
+</details>
+
+<details>
+<summary><strong>Demo Script</strong></summary>
+
+To test the full flow with sample data:
+```
+GET /?f=chatbot-demo
+```
+This pushes 5 sample events (gift-sub, new-sub, cheer-alert, hype-chat, raid-alert) to the stack and activates the `listen-to-chatbot` Script layer.
+</details>
+
 ---
 
 ## 🐛 Debugging & Development

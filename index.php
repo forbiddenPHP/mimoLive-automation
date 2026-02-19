@@ -117,7 +117,7 @@ functions:
         return is_array($data) ? $data : [];
     }
 
-    function stack_push($script) {
+    function stack_push($script, $params = []) {
         $fp = fopen(stack_file(), 'c+');
         if (!$fp) return false;
         flock($fp, LOCK_EX);
@@ -125,7 +125,9 @@ functions:
         $stack = (strlen(trim($content)) > 0) ? json_decode($content, true) : [];
         if (!is_array($stack)) $stack = [];
         $id = count($stack) > 0 ? max(array_column($stack, 'id')) + 1 : 1;
-        $stack[] = ['id' => $id, 'script' => $script, 'added' => date('c')];
+        $entry = ['id' => $id, 'script' => $script, 'added' => date('c')];
+        if (!empty($params)) $entry['params'] = $params;
+        $stack[] = $entry;
         ftruncate($fp, 0);
         rewind($fp);
         fwrite($fp, json_encode(array_values($stack), JSON_PRETTY_PRINT));
@@ -1466,11 +1468,22 @@ read_script:
         if ($count < 1) $count = 1;
         $popped = stack_pop($count);
         if (empty($popped)) {
-            // Nothing on the stack — behave as if no script was given
-            goto error_no_script;
+            global $OUTPUT;
+            array_set($OUTPUT, 'code', 200);
+            array_set($OUTPUT, 'message', 'Stack is empty. Nothing to process.');
+            $everything_is_fine = true;
+            goto input_done;
         }
-        $scripts = array_column($popped, 'script');
-        $script = implode("\n", $scripts);
+        $script_parts = [];
+        foreach ($popped as $entry) {
+            $part = '';
+            if (!empty($entry['params'])) {
+                $part .= '$_GET = '.var_export($entry['params'], true).";\n";
+            }
+            $part .= $entry['script'];
+            $script_parts[] = $part;
+        }
+        $script = implode("\n", $script_parts);
 
         // Stack scripts always run in realtime (like &realtime=true)
         $background_mode = false;
@@ -1486,7 +1499,8 @@ read_script:
 
     // toStack: push script onto the stack instead of executing it
     if (isset($_GET['toStack'])) {
-        $stack_id = stack_push($script);
+        $stack_params = array_diff_key($_GET, array_flip(['f', 'q', 'toStack', 'test', 'realtime']));
+        $stack_id = stack_push($script, $stack_params);
         if ($stack_id === false) {
             global $OUTPUT;
             array_set($OUTPUT, 'code', 500);
@@ -1498,6 +1512,7 @@ read_script:
         array_set($OUTPUT, 'message', 'Script pushed to stack.');
         array_set($OUTPUT, 'stackId', $stack_id);
         $everything_is_fine = true;
+        unset($script);
         goto input_done;
     }
 
@@ -2152,6 +2167,17 @@ script_functions:
 
         $escaped = escapeshellarg($fontName);
         $result = trim(shell_exec("mdfind \"kMDItemFonts == $escaped\"") ?? '');
+
+        if (strlen($result) > 0) {
+            $lines = explode("\n", $result);
+            $cache[$fontName] = $lines[0];
+            return $lines[0];
+        }
+
+        // Fallback: find by filename in system font directories
+        $baseName = preg_replace('/-(Bold|Italic|Light|Medium|Regular|Thin|Heavy|Black|Condensed|UltraLight|SemiBold).*$/i', '', $fontName);
+        $escapedBase = escapeshellarg("*{$baseName}*");
+        $result = trim(shell_exec("find /System/Library/Fonts /Library/Fonts ~/Library/Fonts -iname $escapedBase 2>/dev/null") ?? '');
 
         if (strlen($result) > 0) {
             $lines = explode("\n", $result);

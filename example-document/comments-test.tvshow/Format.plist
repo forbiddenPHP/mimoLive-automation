@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>TVApplicationRevision</key>
-	<integer>30758</integer>
+	<integer>30775</integer>
 	<key>TVApplicationVersion</key>
-	<string>6.16b6</string>
+	<string>6.17b2</string>
 	<key>TVDocumentFormatVersion</key>
 	<string>3.200</string>
 	<key>TVHardwareModel</key>
 	<string>Mac14,14</string>
 	<key>TVMacOSVersion</key>
-	<string>Version 26.2 (Build 25C56)</string>
+	<string>Version 26.3 (Build 25D125)</string>
 	<key>TVPhysicalMemory</key>
 	<string>192.00 GB</string>
 	<key>TVProcessorCount</key>
