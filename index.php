@@ -442,6 +442,7 @@ functions:
                     foreach ($data['data'] as $doc) {
                         $doc_id = $doc['id'];
                         $doc_name = $doc['attributes']['name'];
+                        if (str_ends_with(strtolower($doc_name), '.tvshow')) $doc_name = substr($doc_name, 0, -7);
 
                         namedAPI_set('hosts/'.$host_name.'/documents/'.$doc_name.'/id', $doc_id);
                         foreach ($doc['attributes'] as $attr_key => $attr_value) {

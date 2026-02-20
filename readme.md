@@ -1476,6 +1476,10 @@ switch ($current_variant) {
 
 See `setSleep()` documentation for details on when the namedAPI is reloaded.
 
+### Document Names
+
+The document name used in keypaths is derived from the mimoLive filename **without** the `.tvShow` extension. For example, a file called `comments-test.tvShow` becomes `hosts/master/documents/comments-test/...` in the namedAPI.
+
 ---
 
 *Note: If you debug your script, you can use `run();`. It executes the block(s) above and exits afterwards. Following blocks are ignored.*
